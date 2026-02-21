@@ -334,3 +334,43 @@ Ported three key improvements from clip.py into the Node.js video processing pip
 3. Silence-snapped cuts (clean audio boundaries via ffmpeg silencedetect)
 
 ---
+
+## Feb 21 — Full Pipeline Test with Real Video
+
+### User Prompt
+"uploaded the video to the gcs bucket." / "now test the full pipeline with a video. what is needed for that to work?"
+
+### Actions Taken
+
+**process-local.js Updated for New Service Signatures**
+- Updated process-local.js to use new service APIs: { text, words } from transcribeVideo, detectSilences, multimodal analyzeClips, snapToSilence mapping
+- Added detailed logging for word-index-to-timestamp mapping and silence snapping
+
+**Audio Encoding Fix**
+- Discovered Speech-to-Text rejects .mov containers (bad encoding error)
+- Added FFmpeg audio extraction step: converts video audio to mono FLAC at 16kHz
+- Uploads FLAC to GCS for transcription, then cleans up local file
+- Updated speechToText.js to detect FLAC input and use appropriate config (encoding: FLAC, sampleRateHertz: 16000, model: default)
+
+**Database Record Fix**
+- Updated videos table record to match actual GCS filename (famguytest.mov)
+
+**Successful Pipeline Run**
+- Video: famguytest.mov (258s / 4m18s Family Guy clip)
+- Transcription: 878 chars, 170 words with word-level timestamps
+- Shot detection: 112 shot changes
+- Silence detection: 72 silence segments
+- Gemini 2.5 Pro multimodal analysis: 3 clips identified
+- All clip boundaries snapped to silence midpoints for clean cuts
+- 3 clips cut with FFmpeg and uploaded to GCS processed bucket
+
+### Generated Clips
+1. "Stuck in Prison Forever?" (rank #1, score 9) — 36s
+2. "Peter's Prison Prediction & Log Joke" (rank #2, score 8) — 37s
+3. "Joe's Genius (and Awkward) Escape Tactic" (rank #3, score 10) — 113s
+
+### Files Modified
+- backend/video-processor/process-local.js (updated for new service signatures + audio extraction)
+- backend/video-processor/src/services/speechToText.js (FLAC encoding support)
+
+---

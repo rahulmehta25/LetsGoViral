@@ -26,12 +26,15 @@ async function transcribeVideo(gcsUri) {
 
   const audio = { uri: gcsUri };
 
+  const isOgg = gcsUri.endsWith('.ogg');
+
   const config = {
     languageCode: 'en-US',
     enableAutomaticPunctuation: true,
-    enableWordTimeOffsets: true,          // Useful for future clip-to-word alignment
-    model: 'video',                        // Best model for video content
-    audioChannelCount: 2,
+    enableWordTimeOffsets: true,
+    model: isOgg ? 'default' : 'video',
+    audioChannelCount: isOgg ? 1 : 2,
+    ...(isOgg ? { encoding: 'OGG_OPUS', sampleRateHertz: 16000 } : {}),
     enableSeparateRecognitionPerChannel: false,
   };
 

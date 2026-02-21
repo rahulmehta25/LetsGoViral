@@ -14,6 +14,7 @@ const { Storage }        = require('@google-cloud/storage');
 const { v4: uuidv4 }     = require('uuid');
 const fs                 = require('fs');
 const path               = require('path');
+const { spawn }          = require('child_process');
 const db                 = require('./src/db');
 const { detectShotChanges }  = require('./src/services/videoIntelligence');
 const { transcribeVideo }    = require('./src/services/speechToText');
@@ -52,10 +53,12 @@ async function main() {
     await updateStatus(videoId, 'PROCESSING');
 
     // 3. Download from GCS
-    const localVideoPath = path.join(TMP_DIR, `input_${videoId}.mp4`);
+    const localVideoPath = path.join(TMP_DIR, `input_${videoId}${path.extname(uploadPath)}`);
     logger.info(`Downloading to ${localVideoPath}...`);
     await storage.bucket(UPLOADS_BUCKET).file(uploadPath).download({ destination: localVideoPath });
     logger.info('Download complete');
+
+    const gcsUri = `gs://${UPLOADS_BUCKET}/${uploadPath}`;
 
     // 4. Get duration
     const videoDurationSeconds = await getVideoDuration(localVideoPath);
@@ -64,19 +67,32 @@ async function main() {
       Math.round(videoDurationSeconds), videoId,
     ]);
 
-    // 5. Transcribe + Shot Detection + Silence Detection (parallel)
+    // 5. Extract audio to OGG_OPUS for Speech-to-Text (small files, fast upload)
     await updateStatus(videoId, 'TRANSCRIBING');
-    const gcsUri = `gs://${UPLOADS_BUCKET}/${uploadPath}`;
-    logger.info('Starting transcription, shot detection, and silence detection in parallel...');
+    const audioPath = path.join(TMP_DIR, `audio_${videoId}.ogg`);
+    logger.info('Extracting audio to OGG_OPUS...');
+    await new Promise((resolve, reject) => {
+      const proc = spawn('ffmpeg', ['-y', '-i', localVideoPath, '-vn', '-ac', '1', '-ar', '16000', '-c:a', 'libopus', '-b:a', '32k', audioPath]);
+      proc.on('close', (code) => code === 0 ? resolve() : reject(new Error(`FFmpeg audio extraction exited ${code}`)));
+      proc.on('error', reject);
+    });
 
+    const audioGcsPath = `audio/${videoId}.ogg`;
+    await storage.bucket(UPLOADS_BUCKET).upload(audioPath, { destination: audioGcsPath });
+    const audioGcsUri = `gs://${UPLOADS_BUCKET}/${audioGcsPath}`;
+    logger.info(`Audio uploaded to ${audioGcsUri}`);
+    fs.unlink(audioPath, () => {});
+
+    // 6. Transcribe + Shot Detection + Silence Detection (parallel)
+    logger.info('Starting transcription, shot detection, and silence detection in parallel...');
     const [transcriptionResult, shotTimestamps, silences] = await Promise.all([
-      transcribeVideo(gcsUri),
+      transcribeVideo(audioGcsUri),
       detectShotChanges(gcsUri),
       detectSilences(localVideoPath),
     ]);
 
     const { text: transcription, words } = transcriptionResult;
-    logger.info(`Transcription: ${transcription.substring(0, 200)}...`);
+    logger.info(`Transcription (${transcription.length} chars, ${words.length} words): ${transcription.substring(0, 200)}...`);
     await db.query('UPDATE videos SET transcription = $1, updated_at = now() WHERE id = $2', [
       transcription, videoId,
     ]);
@@ -86,7 +102,9 @@ async function main() {
       JSON.stringify(shotTimestamps), videoId,
     ]);
 
-    // 7. AI clip analysis
+    logger.info(`Found ${silences.length} silence segments`);
+
+    // 7. AI clip analysis (multimodal — sends video + word transcript)
     await updateStatus(videoId, 'ANALYZING');
     const { rows: scriptRows } = await db.query(
       `SELECT content FROM scripts WHERE project_id = $1 ORDER BY created_at DESC LIMIT 1`,
@@ -94,7 +112,7 @@ async function main() {
     );
     const script = scriptRows[0]?.content?.text || null;
 
-    logger.info('Analyzing clips with Gemini...');
+    logger.info('Analyzing clips with Gemini 2.5 Pro (multimodal)...');
     const rawClips = await analyzeClips({
       words,
       videoDurationSeconds,
@@ -103,26 +121,33 @@ async function main() {
     });
     logger.info(`Gemini identified ${rawClips.length} clips`);
 
+    // 8. Map word indices to timestamps and snap to silence boundaries
     const clips = rawClips.map((clip) => {
       const rawStart = words[clip.start_word_index].start;
       const rawEnd   = words[clip.end_word_index].end;
+      const snappedStart = snapToSilence(rawStart, silences, 2.0);
+      const snappedEnd   = snapToSilence(rawEnd, silences, 2.0);
+      logger.info(`Clip "${clip.title}": words[${clip.start_word_index}..${clip.end_word_index}] → ${rawStart.toFixed(2)}s-${rawEnd.toFixed(2)}s → snapped ${snappedStart.toFixed(2)}s-${snappedEnd.toFixed(2)}s`);
       return {
         ...clip,
-        start_time: snapToSilence(rawStart, silences, 2.0),
-        end_time:   snapToSilence(rawEnd, silences, 2.0),
+        start_time: snappedStart,
+        end_time: snappedEnd,
       };
     });
 
-    // 8. Cut clips with FFmpeg
+    // 9. Cut clips with FFmpeg
     await updateStatus(videoId, 'CLIPPING');
     const clipResults = [];
 
     for (const clip of clips) {
       const clipId = uuidv4();
-      logger.info(`Cutting clip ${clipId}: ${clip.start_time}s - ${clip.end_time}s (rank #${clip.strategic_rank})`);
+      logger.info(`Cutting clip ${clipId}: ${clip.start_time.toFixed(2)}s - ${clip.end_time.toFixed(2)}s (rank #${clip.strategic_rank}, score ${clip.hook_score})`);
 
       const localPath = await cutClip(localVideoPath, clip.start_time, clip.end_time, clipId);
-      const destPath = `${projectId}/${videoId}/${clipId}.mp4`;
+      const slug = clip.title
+        ? clip.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').substring(0, 60)
+        : clipId;
+      const destPath = `${projectId}/${videoId}/${slug}.mp4`;
 
       // Upload to processed bucket
       await storage.bucket(PROCESSED_BUCKET).upload(localPath, {
@@ -148,12 +173,12 @@ async function main() {
         ]
       );
 
-      clipResults.push({ clipId, cdnUrl });
+      clipResults.push({ clipId, cdnUrl, title: clip.title });
       logger.info(`Clip ${clipId} uploaded: ${cdnUrl}`);
       fs.unlink(localPath, () => {});
     }
 
-    // 9. Edit guidance (if script exists)
+    // 10. Edit guidance (if script exists)
     if (script && transcription) {
       try {
         const { generateEditGuidance } = require('./src/services/editGuidance');
@@ -171,10 +196,12 @@ async function main() {
       }
     }
 
-    // 10. Done
+    // 11. Done
     await updateStatus(videoId, 'COMPLETED');
-    logger.info(`\nDONE! ${clipResults.length} clips generated for video ${videoId}`);
-    clipResults.forEach((c, i) => logger.info(`  ${i + 1}. ${c.cdnUrl}`));
+    logger.info(`\n========================================`);
+    logger.info(`DONE! ${clipResults.length} clips generated for video ${videoId}`);
+    logger.info(`========================================`);
+    clipResults.forEach((c, i) => logger.info(`  ${i + 1}. [${c.title}] ${c.cdnUrl}`));
 
     fs.unlink(localVideoPath, () => {});
     process.exit(0);

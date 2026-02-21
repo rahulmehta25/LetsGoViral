@@ -121,7 +121,10 @@ async function main() {
     for (const clip of clips) {
       const clipId     = uuidv4();
       const localPath  = await cutClip(localVideoPath, clip.start_time, clip.end_time, clipId);
-      const destPath   = `${projectId}/${videoId}/${clipId}.mp4`;
+      const slug = clip.title
+        ? clip.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').substring(0, 60)
+        : clipId;
+      const destPath   = `${projectId}/${videoId}/${slug}.mp4`;
 
       // Upload to processed bucket
       await storage.bucket(PROCESSED_BUCKET).upload(localPath, {

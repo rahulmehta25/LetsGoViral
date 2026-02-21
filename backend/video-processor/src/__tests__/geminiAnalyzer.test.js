@@ -136,7 +136,7 @@ describe('Gemini Analyzer', () => {
     const mockClips = {
       clips: [{
         start_word_index: 10,
-        end_word_index: 20,
+        end_word_index: 30,
         title: 'Test',
         hook: 'Test hook',
         hook_score: 8.0,
