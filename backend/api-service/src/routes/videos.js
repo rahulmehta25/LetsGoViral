@@ -55,6 +55,8 @@ router.get('/:id', async (req, res) => {
                   'strategic_rank', c.strategic_rank,
                   'hook_score',     c.hook_score,
                   'rationale',      c.rationale,
+                  'title',          c.title,
+                  'hook',           c.hook,
                   'user_approved',  c.user_approved
                 )
                 ORDER BY c.strategic_rank ASC

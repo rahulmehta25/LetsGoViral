@@ -68,9 +68,20 @@ export function ProjectDetailScreen({
                   onClick={() => onOpenReviewer(clip)}
                 >
                   <div className="flex h-28">
-                    <div className="w-28 bg-gray-900 relative flex-shrink-0 group">
+                    <div className="w-28 bg-gray-900 relative flex-shrink-0 group overflow-hidden">
+                      {clip.cdn_url ? (
+                        <video
+                          src={clip.cdn_url}
+                          className="absolute inset-0 w-full h-full object-cover"
+                          muted
+                          playsInline
+                          preload="metadata"
+                          onMouseEnter={(e) => (e.currentTarget as HTMLVideoElement).play().catch(() => {})}
+                          onMouseLeave={(e) => { const v = e.currentTarget as HTMLVideoElement; v.pause(); v.currentTime = 0; }}
+                        />
+                      ) : null}
                       <div className="absolute inset-0 flex items-center justify-center group-hover:scale-110 transition-transform">
-                        <Play className="text-white w-8 h-8 opacity-80" />
+                        <Play className="text-white w-8 h-8 opacity-80 drop-shadow-lg" />
                       </div>
                       <div className="absolute top-2 left-2 bg-[#00D4AA] text-white text-[10px] font-bold px-1.5 py-0.5 rounded shadow-sm">
                         #{clip.strategic_rank ?? '-'}
@@ -83,7 +94,7 @@ export function ProjectDetailScreen({
                     <div className="flex-1 p-3 flex flex-col justify-between">
                       <div>
                         <div className="flex justify-between items-start mb-1">
-                          <h3 className="font-bold text-gray-900 text-sm truncate pr-2">Clip #{clip.strategic_rank ?? '-'}</h3>
+                          <h3 className="font-bold text-gray-900 text-sm truncate pr-2">{clip.title || `Clip #${clip.strategic_rank ?? '-'}`}</h3>
                           <span className="text-xs font-bold text-[#00D4AA] bg-[#00D4AA]/10 px-1.5 py-0.5 rounded">
                             {(clip.hook_score ?? 0).toFixed(1)}/10
                           </span>

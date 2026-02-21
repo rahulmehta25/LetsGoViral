@@ -141,13 +141,14 @@ async function main() {
         `INSERT INTO clips
            (id, video_id, processed_path, cdn_url,
             start_time_seconds, end_time_seconds, duration_seconds,
-            strategic_rank, hook_score, rationale)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+            strategic_rank, hook_score, rationale, title, hook)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
         [
           clipId, videoId, destPath, cdnUrl,
           clip.start_time, clip.end_time,
           parseFloat((clip.end_time - clip.start_time).toFixed(3)),
           clip.strategic_rank, clip.hook_score, clip.rationale,
+          clip.title, clip.hook,
         ]
       );
 

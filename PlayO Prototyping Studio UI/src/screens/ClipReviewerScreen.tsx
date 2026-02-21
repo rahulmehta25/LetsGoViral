@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { ArrowLeft, Check, X, Share2, Play, ChevronLeft, ChevronRight } from 'lucide-react';
 import { Clip } from '../types';
 
@@ -17,10 +17,21 @@ export function ClipReviewerScreen({
 }: ClipReviewerScreenProps) {
   const [isPlaying, setIsPlaying] = useState(true);
   const [currentClipIndex, setCurrentClipIndex] = useState(startIndex);
+  const videoRef = useRef<HTMLVideoElement>(null);
 
   useEffect(() => {
     setCurrentClipIndex(startIndex);
   }, [startIndex]);
+
+  useEffect(() => {
+    const vid = videoRef.current;
+    if (!vid) return;
+    if (isPlaying) {
+      vid.play().catch(() => {});
+    } else {
+      vid.pause();
+    }
+  }, [isPlaying, currentClipIndex]);
 
   const currentClip = clips[currentClipIndex];
 
@@ -79,9 +90,23 @@ export function ClipReviewerScreen({
           </div>
         )}
 
-        <div className="w-full h-full flex items-center justify-center">
-          <div className="text-white/10 font-bold text-6xl select-none">VIDEO</div>
-        </div>
+        {currentClip.cdn_url ? (
+          <video
+            ref={videoRef}
+            key={currentClip.id}
+            src={currentClip.cdn_url}
+            className="w-full h-full object-contain"
+            autoPlay
+            loop
+            playsInline
+            onPlay={() => setIsPlaying(true)}
+            onPause={() => setIsPlaying(false)}
+          />
+        ) : (
+          <div className="w-full h-full flex items-center justify-center">
+            <div className="text-white/10 font-bold text-6xl select-none">NO VIDEO</div>
+          </div>
+        )}
       </div>
 
       <div className="bg-white rounded-t-[32px] shadow-[0_-10px_40px_rgba(0,0,0,0.3)] z-30 animate-slide-up">
@@ -91,7 +116,7 @@ export function ClipReviewerScreen({
 
         <div className="px-6 pb-6">
           <div className="flex justify-between items-center mb-4">
-            <h2 className="text-xl font-bold text-gray-900">Clip #{currentClip.strategic_rank ?? '-'}</h2>
+            <h2 className="text-xl font-bold text-gray-900 truncate">{currentClip.title || `Clip #${currentClip.strategic_rank ?? '-'}`}</h2>
             <div className="flex items-center gap-2">
               <span className="text-xs font-bold text-gray-500 uppercase">Hook Score</span>
               <div className="bg-[#00D4AA]/10 text-[#00D4AA] px-2 py-1 rounded-md font-bold text-sm">

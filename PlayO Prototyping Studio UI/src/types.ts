@@ -48,6 +48,8 @@ export interface Clip {
   hook_score: number | null;
   rationale: string | null;
   cdn_url: string | null;
+  title: string | null;
+  hook: string | null;
   user_approved: boolean | null;
 }
 

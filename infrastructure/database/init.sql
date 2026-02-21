@@ -74,6 +74,8 @@ CREATE TABLE IF NOT EXISTS clips (
     strategic_rank      INT,
     hook_score          FLOAT,
     rationale           TEXT,
+    title               TEXT,
+    hook                TEXT,
     content_embedding   VECTOR(768),
     user_approved       BOOLEAN DEFAULT NULL,
     created_at          TIMESTAMPTZ DEFAULT now()
