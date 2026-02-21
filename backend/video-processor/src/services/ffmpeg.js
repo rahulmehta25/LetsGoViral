@@ -166,4 +166,30 @@ function snapToSilence(timestamp, silences, window = 2.0) {
   return bestMid;
 }
 
-module.exports = { cutClip, getVideoDuration, detectSilences, snapToSilence };
+/**
+ * Extract audio from a video file to OGG_OPUS format for Speech-to-Text.
+ *
+ * @param {string} videoPath  Absolute path to the source video
+ * @param {string} outputPath Absolute path for the output .ogg file
+ * @returns {Promise<void>}
+ */
+async function extractAudioOggOpus(videoPath, outputPath) {
+  return new Promise((resolve, reject) => {
+    const proc = spawn('ffmpeg', [
+      '-y', '-i', videoPath,
+      '-vn', '-ac', '1', '-ar', '16000', '-c:a', 'libopus', '-b:a', '32k',
+      outputPath,
+    ]);
+    let stderr = '';
+    proc.stderr.on('data', (d) => (stderr += d));
+    proc.on('close', (code) => {
+      if (code === 0) return resolve();
+      reject(new Error(`FFmpeg audio extraction exited ${code}: ${stderr.slice(-500)}`));
+    });
+    proc.on('error', (err) => {
+      reject(new Error(`Failed to spawn FFmpeg for audio extraction: ${err.message}`));
+    });
+  });
+}
+
+module.exports = { cutClip, getVideoDuration, detectSilences, snapToSilence, extractAudioOggOpus };

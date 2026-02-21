@@ -2,7 +2,12 @@
 
 const express = require('express');
 const { v4: uuidv4 } = require('uuid');
+const { Storage } = require('@google-cloud/storage');
 const db = require('../db');
+
+const storage = new Storage();
+const UPLOADS_BUCKET   = process.env.GCS_UPLOADS_BUCKET;
+const PROCESSED_BUCKET = process.env.GCS_PROCESSED_BUCKET;
 
 const router = express.Router();
 
@@ -78,11 +83,33 @@ router.put('/:id', async (req, res) => {
 
 // DELETE /api/projects/:id
 router.delete('/:id', async (req, res) => {
+  const { rows: videos } = await db.query(
+    'SELECT id, upload_path FROM videos WHERE project_id = $1',
+    [req.params.id]
+  );
+
+  const { rows: clips } = await db.query(
+    `SELECT c.processed_path FROM clips c
+     JOIN videos v ON c.video_id = v.id
+     WHERE v.project_id = $1`,
+    [req.params.id]
+  );
+
   const { rowCount } = await db.query(
     'DELETE FROM projects WHERE id = $1',
     [req.params.id]
   );
   if (!rowCount) return res.status(404).json({ error: 'Project not found' });
+
+  const deleteFile = async (bucket, filePath) => {
+    try { await storage.bucket(bucket).file(filePath).delete(); } catch (_) {}
+  };
+
+  Promise.all([
+    ...videos.map(v => v.upload_path ? deleteFile(UPLOADS_BUCKET, v.upload_path) : null),
+    ...clips.map(c => c.processed_path ? deleteFile(PROCESSED_BUCKET, c.processed_path) : null),
+  ]).catch(() => {});
+
   res.status(204).end();
 });
 

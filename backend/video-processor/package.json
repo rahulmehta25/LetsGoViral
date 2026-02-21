@@ -1,7 +1,7 @@
 {
   "name": "clipora-video-processor",
   "version": "1.0.0",
-  "description": "Clipora video processing Cloud Run Job — FFmpeg + AI analysis",
+  "description": "Clipora video processing Cloud Run Service — FFmpeg + AI analysis",
   "main": "src/run-job.js",
   "type": "commonjs",
   "scripts": {

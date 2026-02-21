@@ -7,8 +7,11 @@ import {
   Clip,
 } from '../types';
 
-const API_BASE_URL = (import.meta.env.VITE_API_URL as string | undefined) || 'http://localhost:8080';
-const API_KEY = (import.meta.env.VITE_API_KEY as string | undefined) || 'dev-api-key';
+const API_BASE_URL = import.meta.env.VITE_API_URL as string;
+const API_KEY = import.meta.env.VITE_API_KEY as string;
+
+if (!API_BASE_URL) throw new Error('VITE_API_URL environment variable is required');
+if (!API_KEY) throw new Error('VITE_API_KEY environment variable is required');
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE_URL}/api${path}`, {

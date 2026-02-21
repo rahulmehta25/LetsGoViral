@@ -12,7 +12,7 @@ const db                 = require('./db');
 const { detectShotChanges }  = require('./services/videoIntelligence');
 const { transcribeVideo }    = require('./services/speechToText');
 const { analyzeClips }       = require('./services/geminiAnalyzer');
-const { cutClip, getVideoDuration, detectSilences, snapToSilence } = require('./services/ffmpeg');
+const { cutClip, getVideoDuration, detectSilences, snapToSilence, extractAudioOggOpus } = require('./services/ffmpeg');
 const { logger }         = require('./utils/logger');
 
 const storage     = new Storage();
@@ -27,8 +27,21 @@ if (!fs.existsSync(TMP_DIR)) fs.mkdirSync(TMP_DIR, { recursive: true });
 // ─────────────────────────────────────────────────────────────────────────────
 // Video processing pipeline (extracted from former one-shot main())
 // ─────────────────────────────────────────────────────────────────────────────
+const API_TIMEOUT_MS = parseInt(process.env.API_TIMEOUT_MS || '600000', 10);
+
+function withTimeout(promise, ms, label) {
+  let timer;
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms / 1000}s`)), ms);
+    }),
+  ]).finally(() => clearTimeout(timer));
+}
+
 async function processVideo(bucketName, objectName) {
   let videoId;
+  const tmpFiles = [];
 
   try {
     logger.info(`Processing upload: gs://${bucketName}/${objectName}`);
@@ -57,6 +70,7 @@ async function processVideo(bucketName, objectName) {
 
     // ── 4. Download Video to Temp Storage ─────────────────────────────────
     const localVideoPath = path.join(TMP_DIR, `input_${videoId}.mp4`);
+    tmpFiles.push(localVideoPath);
     logger.info(`Downloading video to ${localVideoPath}`);
     await storage.bucket(bucketName).file(objectName).download({ destination: localVideoPath });
 
@@ -72,31 +86,21 @@ async function processVideo(bucketName, objectName) {
     const gcsUri = `gs://${bucketName}/${objectName}`;
 
     const audioPath = path.join(TMP_DIR, `audio_${videoId}.ogg`);
+    tmpFiles.push(audioPath);
     logger.info('Extracting audio to OGG_OPUS...');
-    await new Promise((resolve, reject) => {
-      const proc = spawn('ffmpeg', [
-        '-y', '-i', localVideoPath,
-        '-vn', '-ac', '1', '-ar', '16000', '-c:a', 'libopus', '-b:a', '32k',
-        audioPath,
-      ]);
-      let stderr = '';
-      proc.stderr.on('data', (d) => (stderr += d));
-      proc.on('close', (code) => code === 0 ? resolve() : reject(new Error(`FFmpeg audio extraction exited ${code}: ${stderr.slice(-500)}`)));
-      proc.on('error', reject);
-    });
+    await extractAudioOggOpus(localVideoPath, audioPath);
 
     const audioGcsPath = `audio/${videoId}.ogg`;
     await storage.bucket(bucketName).upload(audioPath, { destination: audioGcsPath });
     const audioGcsUri = `gs://${bucketName}/${audioGcsPath}`;
     logger.info(`Audio uploaded to ${audioGcsUri}`);
-    fs.unlink(audioPath, () => {});
 
     // ── 7. Transcribe + Shot Detection + Silence Detection (parallel) ─────
     logger.info('Starting transcription, shot detection, and silence detection in parallel...');
 
     const [transcriptionResult, shotTimestamps, silences] = await Promise.all([
-      transcribeVideo(audioGcsUri),
-      detectShotChanges(gcsUri),
+      withTimeout(transcribeVideo(audioGcsUri), API_TIMEOUT_MS, 'transcribeVideo'),
+      withTimeout(detectShotChanges(gcsUri), API_TIMEOUT_MS, 'detectShotChanges'),
       detectSilences(localVideoPath),
     ]);
 
@@ -119,12 +123,12 @@ async function processVideo(bucketName, objectName) {
     );
     const script = scriptRows[0]?.content?.text || null;
 
-    const rawClips = await analyzeClips({
+    const rawClips = await withTimeout(analyzeClips({
       words,
       videoDurationSeconds,
       script,
       gcsUri,
-    });
+    }), API_TIMEOUT_MS, 'analyzeClips');
 
     // Map word indices to timestamps and snap to silence boundaries
     const clips = rawClips.map((clip) => {
@@ -207,11 +211,20 @@ async function processVideo(bucketName, objectName) {
     await updateVideoStatus(videoId, 'COMPLETED');
     logger.info(`Video ${videoId} processing complete. ${clipResults.length} clips generated.`);
 
-    // Clean up local video file
-    fs.unlink(localVideoPath, () => {});
+    // Clean up orphaned audio file from GCS
+    try {
+      await storage.bucket(bucketName).file(audioGcsPath).delete();
+      logger.info(`Deleted temporary GCS audio: ${audioGcsPath}`);
+    } catch (e) {
+      logger.warn(`Failed to delete GCS audio ${audioGcsPath}: ${e.message}`);
+    }
   } catch (err) {
     logger.error({ message: `Processing failed: ${err.message}`, stack: err.stack });
     if (videoId) await updateVideoStatus(videoId, 'FAILED').catch(() => {});
+  } finally {
+    for (const f of tmpFiles) {
+      fs.unlink(f, () => {});
+    }
   }
 }
 

@@ -14,12 +14,11 @@ const { Storage }        = require('@google-cloud/storage');
 const { v4: uuidv4 }     = require('uuid');
 const fs                 = require('fs');
 const path               = require('path');
-const { spawn }          = require('child_process');
 const db                 = require('./src/db');
 const { detectShotChanges }  = require('./src/services/videoIntelligence');
 const { transcribeVideo }    = require('./src/services/speechToText');
 const { analyzeClips }       = require('./src/services/geminiAnalyzer');
-const { cutClip, getVideoDuration, detectSilences, snapToSilence } = require('./src/services/ffmpeg');
+const { cutClip, getVideoDuration, detectSilences, snapToSilence, extractAudioOggOpus } = require('./src/services/ffmpeg');
 const { logger }         = require('./src/utils/logger');
 
 const storage     = new Storage();
@@ -71,11 +70,7 @@ async function main() {
     await updateStatus(videoId, 'TRANSCRIBING');
     const audioPath = path.join(TMP_DIR, `audio_${videoId}.ogg`);
     logger.info('Extracting audio to OGG_OPUS...');
-    await new Promise((resolve, reject) => {
-      const proc = spawn('ffmpeg', ['-y', '-i', localVideoPath, '-vn', '-ac', '1', '-ar', '16000', '-c:a', 'libopus', '-b:a', '32k', audioPath]);
-      proc.on('close', (code) => code === 0 ? resolve() : reject(new Error(`FFmpeg audio extraction exited ${code}`)));
-      proc.on('error', reject);
-    });
+    await extractAudioOggOpus(localVideoPath, audioPath);
 
     const audioGcsPath = `audio/${videoId}.ogg`;
     await storage.bucket(UPLOADS_BUCKET).upload(audioPath, { destination: audioGcsPath });
@@ -207,12 +202,23 @@ async function main() {
     logger.info(`========================================`);
     clipResults.forEach((c, i) => logger.info(`  ${i + 1}. [${c.title}] ${c.cdnUrl}`));
 
+    // Clean up orphaned audio file from GCS
+    try {
+      await storage.bucket(UPLOADS_BUCKET).file(audioGcsPath).delete();
+      logger.info(`Deleted temporary GCS audio: ${audioGcsPath}`);
+    } catch (e) {
+      logger.warn(`Failed to delete GCS audio ${audioGcsPath}: ${e.message}`);
+    }
+
     fs.unlink(localVideoPath, () => {});
+    fs.unlink(audioPath, () => {});
     process.exit(0);
   } catch (err) {
     logger.error(`Processing failed: ${err.message}`);
     logger.error(err.stack);
     await updateStatus(videoId, 'FAILED').catch(() => {});
+    fs.unlink(localVideoPath, () => {});
+    fs.unlink(audioPath, () => {});
     process.exit(1);
   }
 }

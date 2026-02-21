@@ -10,6 +10,8 @@ export interface Clip {
   strategic_rank: number;
   hook_score: number;
   rationale: string;
+  title: string | null;
+  hook: string | null;
   user_approved: boolean | null;
 }
 
