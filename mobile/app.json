@@ -1,0 +1,67 @@
+{
+  "expo": {
+    "name": "Clipora",
+    "slug": "clipora",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "scheme": "clipora",
+    "userInterfaceStyle": "automatic",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#000000"
+    },
+    "assetBundlePatterns": ["**/*"],
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.clipora.app",
+      "infoPlist": {
+        "NSPhotoLibraryUsageDescription": "Clipora needs access to your photo library to select videos for processing.",
+        "NSMicrophoneUsageDescription": "Clipora needs microphone access for video recording.",
+        "NSCameraUsageDescription": "Clipora needs camera access for video recording.",
+        "UIBackgroundModes": ["fetch", "remote-notification"]
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#000000"
+      },
+      "package": "com.clipora.app",
+      "permissions": [
+        "READ_EXTERNAL_STORAGE",
+        "WRITE_EXTERNAL_STORAGE",
+        "CAMERA",
+        "RECORD_AUDIO"
+      ]
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "static",
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      [
+        "expo-image-picker",
+        { "photosPermission": "Allow Clipora to access your videos." }
+      ],
+      [
+        "expo-media-library",
+        {
+          "photosPermission": "Allow Clipora to save clips to your library.",
+          "savePhotosPermission": "Allow Clipora to save clips to your library."
+        }
+      ],
+      [
+        "expo-av",
+        { "microphonePermission": "Allow Clipora to access the microphone." }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}

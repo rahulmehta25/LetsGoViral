@@ -1,0 +1,54 @@
+{
+  "name": "clipora-mobile",
+  "version": "1.0.0",
+  "main": "expo-router/entry",
+  "scripts": {
+    "start": "expo start",
+    "android": "expo start --android",
+    "ios": "expo start --ios",
+    "web": "expo start --web",
+    "test": "jest --watchAll",
+    "lint": "eslint . --ext .js,.jsx,.ts,.tsx"
+  },
+  "dependencies": {
+    "expo": "~53.0.0",
+    "expo-router": "~4.0.0",
+    "expo-status-bar": "~2.0.0",
+    "expo-image-picker": "~16.0.0",
+    "expo-file-system": "~18.0.0",
+    "expo-av": "~15.0.0",
+    "expo-media-library": "~17.0.0",
+    "expo-background-fetch": "~13.0.0",
+    "expo-task-manager": "~12.0.0",
+    "expo-secure-store": "~14.0.0",
+    "react": "18.3.2",
+    "react-native": "0.76.5",
+    "react-native-safe-area-context": "4.12.0",
+    "react-native-screens": "~4.4.0",
+    "@react-navigation/native": "^6.1.18",
+    "axios": "^1.7.9",
+    "@tanstack/react-query": "^5.56.2",
+    "zustand": "^5.0.1",
+    "nativewind": "^4.1.23",
+    "tailwindcss": "^3.4.17",
+    "react-native-reanimated": "~3.16.1",
+    "react-native-gesture-handler": "~2.20.2",
+    "@expo/vector-icons": "^14.0.4",
+    "react-native-svg": "15.8.0"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.25.2",
+    "@types/react": "~18.3.12",
+    "@types/react-native": "~0.73.0",
+    "typescript": "^5.3.3",
+    "jest": "^29.7.0",
+    "jest-expo": "~53.0.0",
+    "@testing-library/react-native": "^12.7.2",
+    "eslint": "^8.57.0",
+    "eslint-config-expo": "^8.0.1"
+  },
+  "jest": {
+    "preset": "jest-expo"
+  },
+  "private": true
+}

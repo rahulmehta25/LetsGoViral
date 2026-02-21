@@ -1,0 +1,28 @@
+{
+  "name": "clipora-video-processor",
+  "version": "1.0.0",
+  "description": "Clipora video processing Cloud Run Job — FFmpeg + AI analysis",
+  "main": "src/run-job.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node src/run-job.js",
+    "dev": "nodemon src/run-job.js"
+  },
+  "dependencies": {
+    "@google-cloud/pubsub": "^4.4.0",
+    "@google-cloud/speech": "^6.5.0",
+    "@google-cloud/storage": "^7.7.0",
+    "@google-cloud/video-intelligence": "^5.0.4",
+    "@google-cloud/vertexai": "^1.1.0",
+    "dotenv": "^16.4.5",
+    "pg": "^8.11.5",
+    "uuid": "^9.0.1",
+    "winston": "^3.13.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.0"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  }
+}

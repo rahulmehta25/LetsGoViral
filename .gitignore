@@ -1,0 +1,24 @@
+# Dependencies
+node_modules/
+
+# Environment and secrets
+.env
+.env.local
+.env.*.local
+*.pem
+.terraform-secrets.txt
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+.terraform.lock.hcl
+
+# Build / IDE
+dist/
+.expo/
+*.log
+.DS_Store
+
+# Optional: keep .env.example
+!.env.example

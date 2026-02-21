@@ -1,0 +1,178 @@
+name: Deploy to GCP Cloud Run
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  GCP_PROJECT_ID:  ${{ secrets.GCP_PROJECT_ID }}
+  GCP_REGION:      us-east1
+  AR_REPO:         ${{ secrets.GCP_PROJECT_ID }}/clipora
+  API_IMAGE:       us-east1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/clipora/api-service
+  JOB_IMAGE:       us-east1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/clipora/video-processor
+
+jobs:
+  # ─────────────────────────────────────────
+  # Build & Deploy API Service
+  # ─────────────────────────────────────────
+  deploy-api:
+    name: Deploy API Service
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write  # Required for Workload Identity Federation
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Authenticate to GCP (Workload Identity Federation)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WIF_PROVIDER }}
+          service_account:           ${{ secrets.GCP_SERVICE_ACCOUNT_EMAIL }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker for Artifact Registry
+        run: gcloud auth configure-docker us-east1-docker.pkg.dev --quiet
+
+      - name: Build & Push API Service Image
+        working-directory: backend/api-service
+        run: |
+          docker build -t ${{ env.API_IMAGE }}:${{ github.sha }} -t ${{ env.API_IMAGE }}:latest .
+          docker push ${{ env.API_IMAGE }}:${{ github.sha }}
+          docker push ${{ env.API_IMAGE }}:latest
+
+      - name: Deploy API Service to Cloud Run
+        uses: google-github-actions/deploy-cloudrun@v2
+        with:
+          service:  clipora-api
+          region:   ${{ env.GCP_REGION }}
+          image:    ${{ env.API_IMAGE }}:${{ github.sha }}
+          flags: |
+            --min-instances=0
+            --max-instances=10
+            --concurrency=80
+            --memory=512Mi
+            --cpu=1
+            --vpc-connector=clipora-vpc-connector
+            --service-account=${{ secrets.GCP_SERVICE_ACCOUNT_EMAIL }}
+          env_vars: |
+            NODE_ENV=production
+            GCP_PROJECT_ID=${{ secrets.GCP_PROJECT_ID }}
+            GCP_REGION=us-east1
+            GCS_UPLOADS_BUCKET=${{ secrets.GCS_UPLOADS_BUCKET }}
+            GCS_PROCESSED_BUCKET=${{ secrets.GCS_PROCESSED_BUCKET }}
+            CDN_BASE_URL=${{ secrets.CDN_BASE_URL }}
+            DB_HOST=${{ secrets.DB_HOST }}
+            DB_PORT=5432
+            DB_NAME=creator_mvp
+            DB_USER=clipora
+          secrets: |
+            MVP_API_KEY=clipora-api-key:latest
+            DB_PASSWORD=clipora-db-password:latest
+          env_vars_update_strategy: overwrite
+
+  # ─────────────────────────────────────────
+  # Build & Update Video Processor Job
+  # ─────────────────────────────────────────
+  deploy-video-processor:
+    name: Deploy Video Processor Job
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WIF_PROVIDER }}
+          service_account:           ${{ secrets.GCP_SERVICE_ACCOUNT_EMAIL }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker
+        run: gcloud auth configure-docker us-east1-docker.pkg.dev --quiet
+
+      - name: Build & Push Video Processor Image
+        working-directory: backend/video-processor
+        run: |
+          docker build -t ${{ env.JOB_IMAGE }}:${{ github.sha }} -t ${{ env.JOB_IMAGE }}:latest .
+          docker push ${{ env.JOB_IMAGE }}:${{ github.sha }}
+          docker push ${{ env.JOB_IMAGE }}:latest
+
+      - name: Update Cloud Run Job definition
+        run: |
+          gcloud run jobs update clipora-video-processor \
+            --image=${{ env.JOB_IMAGE }}:${{ github.sha }} \
+            --region=${{ env.GCP_REGION }} \
+            --service-account=${{ secrets.GCP_SERVICE_ACCOUNT_EMAIL }} \
+            --vpc-connector=clipora-vpc-connector \
+            --memory=2Gi \
+            --cpu=2 \
+            --task-timeout=3600 \
+            --set-env-vars=NODE_ENV=production,GCP_PROJECT_ID=${{ secrets.GCP_PROJECT_ID }},GCP_REGION=us-east1,GCS_UPLOADS_BUCKET=${{ secrets.GCS_UPLOADS_BUCKET }},GCS_PROCESSED_BUCKET=${{ secrets.GCS_PROCESSED_BUCKET }},CDN_BASE_URL=${{ secrets.CDN_BASE_URL }},TMP_DIR=/tmp/clipora \
+            --set-secrets=DB_PASSWORD=clipora-db-password:latest \
+            || \
+          gcloud run jobs create clipora-video-processor \
+            --image=${{ env.JOB_IMAGE }}:${{ github.sha }} \
+            --region=${{ env.GCP_REGION }} \
+            --service-account=${{ secrets.GCP_SERVICE_ACCOUNT_EMAIL }} \
+            --vpc-connector=clipora-vpc-connector \
+            --memory=2Gi \
+            --cpu=2 \
+            --task-timeout=3600 \
+            --set-env-vars=NODE_ENV=production,GCP_PROJECT_ID=${{ secrets.GCP_PROJECT_ID }},GCP_REGION=us-east1,GCS_UPLOADS_BUCKET=${{ secrets.GCS_UPLOADS_BUCKET }},GCS_PROCESSED_BUCKET=${{ secrets.GCS_PROCESSED_BUCKET }},CDN_BASE_URL=${{ secrets.CDN_BASE_URL }},TMP_DIR=/tmp/clipora \
+            --set-secrets=DB_PASSWORD=clipora-db-password:latest
+
+  # ─────────────────────────────────────────
+  # Run Tests (parallel with builds)
+  # ─────────────────────────────────────────
+  test-api:
+    name: Test API Service
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg15
+        env:
+          POSTGRES_PASSWORD: test_password
+          POSTGRES_DB: creator_mvp_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: backend/api-service/package-lock.json
+
+      - name: Install dependencies
+        working-directory: backend/api-service
+        run: npm ci
+
+      - name: Run tests
+        working-directory: backend/api-service
+        run: npm test
+        env:
+          NODE_ENV:    test
+          DB_HOST:     localhost
+          DB_PORT:     5432
+          DB_NAME:     creator_mvp_test
+          DB_USER:     postgres
+          DB_PASSWORD: test_password
+          MVP_API_KEY: test-api-key
