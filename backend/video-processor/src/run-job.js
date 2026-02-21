@@ -66,22 +66,25 @@ async function main() {
       Math.round(videoDurationSeconds), videoId,
     ]);
 
-    // ── 6. Transcribe ─────────────────────────────────────────────────────
+    // ── 6. Transcribe + Shot Detection + Silence Detection (parallel) ─────
     await updateVideoStatus(videoId, 'TRANSCRIBING');
     const gcsUri = `gs://${bucketName}/${objectName}`;
-    const { text: transcription, words } = await transcribeVideo(gcsUri);
+    logger.info('Starting transcription, shot detection, and silence detection in parallel...');
+
+    const [transcriptionResult, shotTimestamps, silences] = await Promise.all([
+      transcribeVideo(gcsUri),
+      detectShotChanges(gcsUri),
+      detectSilences(localVideoPath),
+    ]);
+
+    const { text: transcription, words } = transcriptionResult;
     await db.query('UPDATE videos SET transcription = $1, updated_at = now() WHERE id = $2', [
       transcription, videoId,
     ]);
 
-    // ── 7. Shot Detection ─────────────────────────────────────────────────
-    const shotTimestamps = await detectShotChanges(gcsUri);
     await db.query('UPDATE videos SET shot_change_timestamps = $1, updated_at = now() WHERE id = $2', [
       JSON.stringify(shotTimestamps), videoId,
     ]);
-
-    // ── 7b. Silence Detection ──────────────────────────────────────────────
-    const silences = await detectSilences(localVideoPath);
 
     // ── 8. AI Clip Analysis ───────────────────────────────────────────────
     await updateVideoStatus(videoId, 'ANALYZING');
@@ -118,7 +121,10 @@ async function main() {
     for (const clip of clips) {
       const clipId     = uuidv4();
       const localPath  = await cutClip(localVideoPath, clip.start_time, clip.end_time, clipId);
-      const destPath   = `${projectId}/${videoId}/${clipId}.mp4`;
+      const slug = clip.title
+        ? clip.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').substring(0, 60)
+        : clipId;
+      const destPath   = `${projectId}/${videoId}/${slug}.mp4`;
 
       // Upload to processed bucket
       await storage.bucket(PROCESSED_BUCKET).upload(localPath, {

@@ -91,8 +91,8 @@ async function analyzeClips({ words, videoDurationSeconds, script, gcsUri }) {
           throw new Error(`Word index out of range: start=${clip.start_word_index} end=${clip.end_word_index} max=${words.length - 1}`);
         }
         const wordCount = clip.end_word_index - clip.start_word_index + 1;
-        if (wordCount < 20) {
-          throw new Error(`Clip too short: only ${wordCount} words (minimum 20)`);
+        if (wordCount < 40) {
+          throw new Error(`Clip too short: only ${wordCount} words (minimum 40)`);
         }
       }
 
@@ -133,14 +133,17 @@ For each clip, provide:
 - strategic_rank: posting order (1 = post first)
 - rationale: one sentence explaining why this clip is valuable
 
-RULES:
-- Each clip MUST contain at least 65 words (end_word_index - start_word_index + 1 >= 65)
-- Clip duration should be 15-60 seconds
-- Use the VIDEO to assess visual engagement, energy, and pacing
-- Use the TRANSCRIPT to identify compelling verbal content
-- Prefer clips with strong opening hooks
-- Avoid cutting mid-sentence; start and end at natural sentence boundaries
+CRITICAL RULES:
+- Each clip MUST be a COMPLETE, SELF-CONTAINED segment — a full topic, story, argument, or bit from start to finish. Never cut in the middle of a thought or topic.
+- Start each clip BEFORE the speaker introduces the topic (include the setup/transition) and end AFTER the speaker finishes the point (include the conclusion/punchline/reaction).
+- The start_word_index should be a few words BEFORE the topic begins (capture the intro/transition).
+- The end_word_index should be a few words AFTER the topic concludes (capture the ending beat).
+- NOTE: The transcript may have gaps where speech wasn't recognized. Use the VIDEO to identify the true start/end of each segment, then find the closest word indices.
+- Clip duration should be 30-90 seconds. Longer is better than cutting off early.
+- Each clip MUST contain at least 80 words (end_word_index - start_word_index + 1 >= 80)
 - Clips must not overlap
+- Use the VIDEO to assess visual engagement, energy, pacing, and where topics naturally begin and end
+- Use the TRANSCRIPT to identify compelling verbal content
 
 PRIORITIZE moments with:
 - Strong emotional language or reactions
@@ -148,6 +151,7 @@ PRIORITIZE moments with:
 - Questions that create curiosity gaps
 - Key moments from the script's intended narrative
 - High visual energy or dynamic scenes
+- Complete stories, arguments, or bits that stand alone
 
 Return ONLY a valid JSON object.`;
 }
