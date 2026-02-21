@@ -9,7 +9,7 @@ const LOCATION = process.env.GCP_REGION || 'us-east1';
 const vertexAI = new VertexAI({ project: PROJECT, location: LOCATION });
 
 // Pro model for highest quality script generation
-const proModel = vertexAI.getGenerativeModel({ model: 'gemini-1.5-pro' });
+const proModel = vertexAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
 
 const SCRIPT_SYSTEM_PROMPT = `You are a world-class scriptwriting assistant for viral social media content. Your name is "Viralizer". You help creators write compelling, human-sounding scripts using proven frameworks from top creators like MrBeast, Alex Hormozi, and popular TikTok trends.
 
@@ -48,7 +48,7 @@ async function streamChat(history) {
  * Single-shot generation — used for long-form edit guidance.
  */
 async function generateEditGuidance(script, transcription) {
-  const flashModel = vertexAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+  const flashModel = vertexAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
 
   const prompt = `Analyze the provided script and the final video transcription. Identify discrepancies and suggest edits for the long-form video to improve pacing and engagement. Provide a list of timestamps where a pattern interrupt, B-roll, or on-screen graphic should be added to maintain viewer attention. Output the suggestions as a JSON object with the following structure:
   {

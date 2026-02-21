@@ -7,7 +7,7 @@ const PROJECT  = process.env.GCP_PROJECT_ID;
 const LOCATION = process.env.GCP_REGION || 'us-east1';
 
 const vertexAI   = new VertexAI({ project: PROJECT, location: LOCATION });
-const flashModel = vertexAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+const flashModel = vertexAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
 
 /**
  * Generate long-form edit guidance by comparing the script to the transcription.

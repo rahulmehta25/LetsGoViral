@@ -10,7 +10,7 @@ const db                 = require('./db');
 const { detectShotChanges }  = require('./services/videoIntelligence');
 const { transcribeVideo }    = require('./services/speechToText');
 const { analyzeClips }       = require('./services/geminiAnalyzer');
-const { cutClip, getVideoDuration } = require('./services/ffmpeg');
+const { cutClip, getVideoDuration, detectSilences, snapToSilence } = require('./services/ffmpeg');
 const { logger }         = require('./utils/logger');
 
 const storage     = new Storage();
@@ -68,8 +68,8 @@ async function main() {
 
     // ── 6. Transcribe ─────────────────────────────────────────────────────
     await updateVideoStatus(videoId, 'TRANSCRIBING');
-    const gcsUri      = `gs://${bucketName}/${objectName}`;
-    const transcription = await transcribeVideo(gcsUri);
+    const gcsUri = `gs://${bucketName}/${objectName}`;
+    const { text: transcription, words } = await transcribeVideo(gcsUri);
     await db.query('UPDATE videos SET transcription = $1, updated_at = now() WHERE id = $2', [
       transcription, videoId,
     ]);
@@ -79,6 +79,9 @@ async function main() {
     await db.query('UPDATE videos SET shot_change_timestamps = $1, updated_at = now() WHERE id = $2', [
       JSON.stringify(shotTimestamps), videoId,
     ]);
+
+    // ── 7b. Silence Detection ──────────────────────────────────────────────
+    const silences = await detectSilences(localVideoPath);
 
     // ── 8. AI Clip Analysis ───────────────────────────────────────────────
     await updateVideoStatus(videoId, 'ANALYZING');
@@ -90,11 +93,22 @@ async function main() {
     );
     const script = scriptRows[0]?.content?.text || null;
 
-    const clips = await analyzeClips({
-      transcription,
-      shotTimestamps,
+    const rawClips = await analyzeClips({
+      words,
       videoDurationSeconds,
       script,
+      gcsUri,
+    });
+
+    // Map word indices to timestamps and snap to silence boundaries
+    const clips = rawClips.map((clip) => {
+      const rawStart = words[clip.start_word_index].start;
+      const rawEnd   = words[clip.end_word_index].end;
+      return {
+        ...clip,
+        start_time: snapToSilence(rawStart, silences, 2.0),
+        end_time:   snapToSilence(rawEnd, silences, 2.0),
+      };
     });
 
     // ── 9. Cut Clips with FFmpeg ──────────────────────────────────────────

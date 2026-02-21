@@ -90,4 +90,76 @@ function runFFmpeg(args) {
   });
 }
 
-module.exports = { cutClip, getVideoDuration };
+/**
+ * Detect silent segments in the audio track using ffmpeg silencedetect filter.
+ *
+ * @param {string} videoPath  Absolute path to the video file
+ * @param {number} [noiseDb=-30]  Noise threshold in dB
+ * @param {number} [minDuration=0.3]  Minimum silence duration in seconds
+ * @returns {Promise<Array<{start: number, end: number}>>}
+ */
+async function detectSilences(videoPath, noiseDb = -30, minDuration = 0.3) {
+  return new Promise((resolve, reject) => {
+    const args = [
+      '-i', videoPath,
+      '-af', `silencedetect=noise=${noiseDb}dB:d=${minDuration}`,
+      '-f', 'null', '-',
+    ];
+
+    const proc = spawn('ffmpeg', args);
+    let stderr = '';
+    proc.stderr.on('data', (d) => (stderr += d));
+
+    proc.on('close', (code) => {
+      // silencedetect outputs to stderr even on success; exit code 0 expected
+      const silences = [];
+      const startRe = /silence_start:\s*([\d.]+)/g;
+      const endRe   = /silence_end:\s*([\d.]+)/g;
+
+      const starts = [];
+      const ends   = [];
+      let m;
+      while ((m = startRe.exec(stderr)) !== null) starts.push(parseFloat(m[1]));
+      while ((m = endRe.exec(stderr)) !== null)   ends.push(parseFloat(m[1]));
+
+      const count = Math.min(starts.length, ends.length);
+      for (let i = 0; i < count; i++) {
+        silences.push({ start: starts[i], end: ends[i] });
+      }
+
+      logger.info(`Detected ${silences.length} silence segments`);
+      resolve(silences);
+    });
+
+    proc.on('error', (err) => {
+      reject(new Error(`Failed to spawn FFmpeg for silence detection: ${err.message}`));
+    });
+  });
+}
+
+/**
+ * Snap a timestamp to the nearest silence midpoint within a search window.
+ * Returns the original timestamp if no silence is found within the window.
+ *
+ * @param {number} timestamp  Target timestamp in seconds
+ * @param {Array<{start: number, end: number}>} silences  Silence segments
+ * @param {number} [window=2.0]  Search window in seconds (+/-)
+ * @returns {number} Snapped timestamp
+ */
+function snapToSilence(timestamp, silences, window = 2.0) {
+  let bestMid = timestamp;
+  let bestDist = Infinity;
+
+  for (const s of silences) {
+    const mid = (s.start + s.end) / 2;
+    const dist = Math.abs(mid - timestamp);
+    if (dist <= window && dist < bestDist) {
+      bestDist = dist;
+      bestMid = mid;
+    }
+  }
+
+  return bestMid;
+}
+
+module.exports = { cutClip, getVideoDuration, detectSilences, snapToSilence };

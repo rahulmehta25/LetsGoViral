@@ -90,9 +90,11 @@ router.post('/chat', async (req, res) => {
     ]);
 
     for await (const chunk of stream) {
-      const text = chunk.text();
-      fullResponse += text;
-      res.write(`data: ${JSON.stringify({ text })}\n\n`);
+      const text = chunk.candidates?.[0]?.content?.parts?.[0]?.text || '';
+      if (text) {
+        fullResponse += text;
+        res.write(`data: ${JSON.stringify({ text })}\n\n`);
+      }
     }
 
     // Persist the assistant's complete response

@@ -15,7 +15,7 @@ async function generateUploadSignedUrl(objectPath, contentType) {
   const [url] = await storage
     .bucket(UPLOADS_BUCKET)
     .file(objectPath)
-    .generateSignedUrl({
+    .getSignedUrl({
       version: 'v4',
       action:  'write',
       expires: Date.now() + 15 * 60 * 1000,

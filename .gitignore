@@ -6,6 +6,9 @@ node_modules/
 .env.local
 .env.*.local
 *.pem
+*.json.key
+gcp-key.json
+**/gcp-key.json
 .terraform-secrets.txt
 
 # Terraform

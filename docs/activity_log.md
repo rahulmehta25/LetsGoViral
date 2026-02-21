@@ -228,3 +228,109 @@ MVP is now fully testable locally:
 4. For full video processing pipeline: requires GCP credentials (Vertex AI, Speech-to-Text, Video Intelligence, Cloud Storage)
 
 ---
+
+## Feb 20 — GCP Credential Setup & Gemini 2.0 Migration
+
+### User Prompt
+"can we not use gcp adc credentials for this? clipora994@gmail.com is the email"
+
+### Actions Taken
+
+**GCP Authentication**
+- Claude Code: Verified gcloud CLI configured with clipora994@gmail.com and project clipora-487805
+- Claude Code: Discovered ADC user credentials cannot sign URLs (missing client_email)
+- Claude Code: Downloaded service account key from clipora-service-account@clipora-487805.iam.gserviceaccount.com
+- Claude Code: Placed gcp-key.json in both api-service and video-processor directories
+- Claude Code: Updated .gitignore with gcp-key.json patterns to prevent credential leaks
+- Claude Code: Verified all required GCP APIs enabled (Speech-to-Text, Video Intelligence, Vertex AI, Cloud Storage)
+- Claude Code: Added roles/speech.client and roles/editor to service account
+
+**Gemini Model Migration (1.5 to 2.0)**
+- Claude Code: Discovered gemini-1.5-pro and gemini-1.5-flash models are no longer available (404 errors)
+- Claude Code: Updated all 4 files to use gemini-2.0-flash:
+  - backend/api-service/src/services/gemini.js (proModel)
+  - backend/video-processor/src/services/geminiAnalyzer.js (flashModel)
+  - backend/video-processor/src/services/editGuidance.js (flashModel)
+  - backend/api-service/src/routes/scripts.js (chunk parsing fix)
+
+**API Fixes**
+- Claude Code: Fixed storage.js — changed generateSignedUrl to getSignedUrl (correct method name)
+- Claude Code: Fixed SSE streaming chunk parsing in scripts.js — chunk.text() to chunk.candidates?.[0]?.content?.parts?.[0]?.text for Gemini 2.0 SDK
+- Claude Code: Created backend/video-processor/process-local.js — local video processing script that bypasses Pub/Sub
+
+**Verification**
+- Claude Code: Tested chat streaming with Gemini 2.0 Flash — SSE streaming works end-to-end
+- Claude Code: Tested GCS signed URL generation with service account key — works correctly
+- Claude Code: Installed FFmpeg via brew for local video processing
+
+### Files Created
+- backend/video-processor/process-local.js
+
+### Files Modified
+- .gitignore (added gcp-key.json patterns)
+- backend/api-service/src/services/gemini.js (gemini-2.0-flash)
+- backend/api-service/src/services/storage.js (getSignedUrl fix)
+- backend/api-service/src/routes/scripts.js (Gemini 2.0 chunk parsing)
+- backend/video-processor/src/services/geminiAnalyzer.js (gemini-2.0-flash)
+- backend/video-processor/src/services/editGuidance.js (gemini-2.0-flash)
+
+### Status
+Full backend pipeline is now ready for end-to-end testing with real GCP services.
+
+---
+
+## Feb 21 — Port clip.py Improvements into Core Services
+
+### User Prompt
+"Implement the plan: Port clip.py Improvements into Core Services — multimodal Gemini, word-level timestamp precision, and silence-snapped cuts."
+
+### Actions Taken
+
+**speechToText.js — Word-Level Timestamps**
+- Updated transcribeVideo() to return { text, words } instead of just a string
+- Added parseTimestamp() helper to convert Google Duration protos to float seconds
+- Extracts word timing data from result.alternatives[0].words into { word, start, end } array
+- text field remains the same concatenated transcript for DB storage
+
+**ffmpeg.js — Silence Detection & Snapping**
+- Added detectSilences(videoPath) function: runs ffmpeg silencedetect filter (noise=-30dB, d=0.3s), parses stderr for silence_start/silence_end pairs, returns [{start, end}] array
+- Added snapToSilence(timestamp, silences, window) function: finds nearest silence midpoint within +/- window seconds (default 2.0), returns original timestamp if no nearby silence
+- Both exported alongside existing cutClip and getVideoDuration
+
+**geminiAnalyzer.js — Multimodal Video + Word Indices + Gemini 2.5 Pro**
+- Switched model from gemini-2.0-flash to gemini-2.5-pro
+- Added multimodal video input: sends video as fileData part alongside text prompt using GCS URI
+- Changed function signature to analyzeClips({ words, videoDurationSeconds, script, gcsUri })
+- Rewrote prompt to include indexed word-level transcript and request start_word_index/end_word_index
+- Added title and hook fields to response schema
+- Added minimum word count validation (20 words per clip)
+- Updated response schema to match new output fields
+
+**run-job.js — Orchestrator Wiring**
+- Updated import to include detectSilences and snapToSilence from ffmpeg.js
+- Step 6: Destructures { text: transcription, words } from transcribeVideo()
+- Added Step 7b: Calls detectSilences(localVideoPath) for silence segments
+- Step 8: Passes { words, videoDurationSeconds, script, gcsUri } to analyzeClips
+- Post-step 8: Maps Gemini's start_word_index/end_word_index to actual timestamps via words array, then snapToSilence() each boundary
+
+**Tests Updated**
+- Rewrote geminiAnalyzer.test.js for new API: multimodal input verification, word index validation, minimum word count test
+- All 3 tests passing
+
+### Files Modified
+- backend/video-processor/src/services/speechToText.js
+- backend/video-processor/src/services/geminiAnalyzer.js
+- backend/video-processor/src/services/ffmpeg.js
+- backend/video-processor/src/run-job.js
+- backend/video-processor/src/__tests__/geminiAnalyzer.test.js
+
+### Test Results
+- backend/video-processor: 3 tests passed (1 suite)
+
+### Technical Summary
+Ported three key improvements from clip.py into the Node.js video processing pipeline:
+1. Multimodal Gemini analysis (video + transcript, not just text)
+2. Word-level timestamp precision (word indices instead of raw timestamps)
+3. Silence-snapped cuts (clean audio boundaries via ffmpeg silencedetect)
+
+---
