@@ -66,22 +66,25 @@ async function main() {
       Math.round(videoDurationSeconds), videoId,
     ]);
 
-    // ── 6. Transcribe ─────────────────────────────────────────────────────
+    // ── 6. Transcribe + Shot Detection + Silence Detection (parallel) ─────
     await updateVideoStatus(videoId, 'TRANSCRIBING');
     const gcsUri = `gs://${bucketName}/${objectName}`;
-    const { text: transcription, words } = await transcribeVideo(gcsUri);
+    logger.info('Starting transcription, shot detection, and silence detection in parallel...');
+
+    const [transcriptionResult, shotTimestamps, silences] = await Promise.all([
+      transcribeVideo(gcsUri),
+      detectShotChanges(gcsUri),
+      detectSilences(localVideoPath),
+    ]);
+
+    const { text: transcription, words } = transcriptionResult;
     await db.query('UPDATE videos SET transcription = $1, updated_at = now() WHERE id = $2', [
       transcription, videoId,
     ]);
 
-    // ── 7. Shot Detection ─────────────────────────────────────────────────
-    const shotTimestamps = await detectShotChanges(gcsUri);
     await db.query('UPDATE videos SET shot_change_timestamps = $1, updated_at = now() WHERE id = $2', [
       JSON.stringify(shotTimestamps), videoId,
     ]);
-
-    // ── 7b. Silence Detection ──────────────────────────────────────────────
-    const silences = await detectSilences(localVideoPath);
 
     // ── 8. AI Clip Analysis ───────────────────────────────────────────────
     await updateVideoStatus(videoId, 'ANALYZING');

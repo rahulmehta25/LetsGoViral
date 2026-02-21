@@ -18,7 +18,7 @@ const db                 = require('./src/db');
 const { detectShotChanges }  = require('./src/services/videoIntelligence');
 const { transcribeVideo }    = require('./src/services/speechToText');
 const { analyzeClips }       = require('./src/services/geminiAnalyzer');
-const { cutClip, getVideoDuration } = require('./src/services/ffmpeg');
+const { cutClip, getVideoDuration, detectSilences, snapToSilence } = require('./src/services/ffmpeg');
 const { logger }         = require('./src/utils/logger');
 
 const storage     = new Storage();
@@ -64,19 +64,23 @@ async function main() {
       Math.round(videoDurationSeconds), videoId,
     ]);
 
-    // 5. Transcribe
+    // 5. Transcribe + Shot Detection + Silence Detection (parallel)
     await updateStatus(videoId, 'TRANSCRIBING');
     const gcsUri = `gs://${UPLOADS_BUCKET}/${uploadPath}`;
-    logger.info('Transcribing audio...');
-    const transcription = await transcribeVideo(gcsUri);
+    logger.info('Starting transcription, shot detection, and silence detection in parallel...');
+
+    const [transcriptionResult, shotTimestamps, silences] = await Promise.all([
+      transcribeVideo(gcsUri),
+      detectShotChanges(gcsUri),
+      detectSilences(localVideoPath),
+    ]);
+
+    const { text: transcription, words } = transcriptionResult;
     logger.info(`Transcription: ${transcription.substring(0, 200)}...`);
     await db.query('UPDATE videos SET transcription = $1, updated_at = now() WHERE id = $2', [
       transcription, videoId,
     ]);
 
-    // 6. Shot detection
-    logger.info('Detecting shot changes...');
-    const shotTimestamps = await detectShotChanges(gcsUri);
     logger.info(`Found ${shotTimestamps.length} shot changes`);
     await db.query('UPDATE videos SET shot_change_timestamps = $1, updated_at = now() WHERE id = $2', [
       JSON.stringify(shotTimestamps), videoId,
@@ -91,13 +95,23 @@ async function main() {
     const script = scriptRows[0]?.content?.text || null;
 
     logger.info('Analyzing clips with Gemini...');
-    const clips = await analyzeClips({
-      transcription,
-      shotTimestamps,
+    const rawClips = await analyzeClips({
+      words,
       videoDurationSeconds,
       script,
+      gcsUri,
     });
-    logger.info(`Gemini identified ${clips.length} clips`);
+    logger.info(`Gemini identified ${rawClips.length} clips`);
+
+    const clips = rawClips.map((clip) => {
+      const rawStart = words[clip.start_word_index].start;
+      const rawEnd   = words[clip.end_word_index].end;
+      return {
+        ...clip,
+        start_time: snapToSilence(rawStart, silences, 2.0),
+        end_time:   snapToSilence(rawEnd, silences, 2.0),
+      };
+    });
 
     // 8. Cut clips with FFmpeg
     await updateStatus(videoId, 'CLIPPING');

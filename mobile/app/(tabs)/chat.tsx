@@ -12,8 +12,14 @@ import { projectsApi, scriptsApi } from '@/api/client';
 import { useAppStore } from '@/store';
 import type { Project } from '@/store';
 
-const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:8080';
+const API_URL = process.env.EXPO_PUBLIC_API_URL;
 const API_KEY = process.env.EXPO_PUBLIC_API_KEY || '';
+
+if (!API_URL) {
+  console.warn('[Chat] EXPO_PUBLIC_API_URL is not set. Chat will not work.');
+}
+
+const SSE_TIMEOUT_MS = 60_000;
 
 interface Message {
   id: string;
@@ -126,61 +132,69 @@ export default function ChatScreen() {
     try {
       const currentScriptId = await ensureScript();
 
-      // SSE streaming via fetch
-      const response = await fetch(`${API_URL}/api/scripts/chat`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-API-Key': API_KEY,
-          'Accept': 'text/event-stream',
-        },
-        body: JSON.stringify({
-          script_id: currentScriptId,
-          message: text.trim(),
-        }),
-      });
-
-      if (!response.ok) {
-        throw new Error(`API error: ${response.status}`);
+      if (!API_URL) {
+        throw new Error('API URL is not configured. Set EXPO_PUBLIC_API_URL.');
       }
 
-      const reader = response.body?.getReader();
-      if (!reader) throw new Error('No response body');
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), SSE_TIMEOUT_MS);
 
-      const decoder = new TextDecoder();
-      let fullText = '';
+      try {
+        const response = await fetch(`${API_URL}/api/scripts/chat`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-API-Key': API_KEY,
+            'Accept': 'text/event-stream',
+          },
+          body: JSON.stringify({
+            script_id: currentScriptId,
+            message: text.trim(),
+          }),
+          signal: controller.signal,
+        });
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
+        if (!response.ok) {
+          throw new Error(`API error: ${response.status}`);
+        }
 
-        const chunk = decoder.decode(value, { stream: true });
-        const lines = chunk.split('\n');
+        const reader = response.body?.getReader();
+        if (!reader) throw new Error('No response body');
 
-        for (const line of lines) {
-          if (!line.startsWith('data: ')) continue;
-          const data = line.slice(6);
+        const decoder = new TextDecoder();
+        let fullText = '';
 
-          if (data === '[DONE]') continue;
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
 
-          try {
-            const parsed = JSON.parse(data);
-            if (parsed.error) {
-              throw new Error(parsed.error);
-            }
-            if (parsed.text) {
-              fullText += parsed.text;
-              setMessages(prev =>
-                prev.map(m => m.id === aiMessageId ? { ...m, content: fullText } : m)
-              );
-            }
-          } catch (parseErr: any) {
-            if (parseErr.message && !parseErr.message.includes('JSON')) {
-              throw parseErr;
+          const chunk = decoder.decode(value, { stream: true });
+          const lines = chunk.split('\n');
+
+          for (const line of lines) {
+            if (!line.startsWith('data: ')) continue;
+            const data = line.slice(6);
+
+            if (data === '[DONE]') continue;
+
+            try {
+              const parsed = JSON.parse(data);
+              if (parsed.error) {
+                throw new Error(parsed.error);
+              }
+              if (parsed.text) {
+                fullText += parsed.text;
+                setMessages(prev =>
+                  prev.map(m => m.id === aiMessageId ? { ...m, content: fullText } : m)
+                );
+              }
+            } catch (parseErr: any) {
+              if (parseErr.message && !parseErr.message.includes('JSON')) {
+                throw parseErr;
+              }
             }
           }
         }
-      }
 
       // If we got no text, show a fallback
       if (!fullText) {
@@ -190,13 +204,20 @@ export default function ChatScreen() {
             : m)
         );
       }
+      } finally {
+        clearTimeout(timeout);
+      }
     } catch (err: any) {
+      const isTimeout = err.name === 'AbortError';
+      const message = isTimeout
+        ? 'The request timed out. Please try again.'
+        : `Sorry, I couldn't connect to the AI service. ${err.message || 'Please try again.'}`;
       console.error('[Chat SSE Error]', err);
       setMessages(prev => {
         const last = prev[prev.length - 1];
         if (last?.role === 'assistant' && !last.content) {
           return prev.map(m => m.id === last.id
-            ? { ...m, content: `Sorry, I couldn't connect to the AI service. ${err.message || 'Please try again.'}` }
+            ? { ...m, content: message }
             : m);
         }
         return prev;
