@@ -1,82 +1,226 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, TextInput,
-  FlatList, KeyboardAvoidingView, Platform, ScrollView
+  FlatList, KeyboardAvoidingView, Platform, ScrollView,
+  ActivityIndicator, Alert
 } from 'react-native';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { projectsApi, scriptsApi } from '@/api/client';
+import { useAppStore } from '@/store';
+import type { Project } from '@/store';
+
+const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:8080';
+const API_KEY = process.env.EXPO_PUBLIC_API_KEY || '';
 
 interface Message {
   id: string;
-  role: 'user' | 'ai';
-  text: string;
+  role: 'user' | 'assistant';
+  content: string;
 }
 
 const quickChips = ['Hook ideas', 'Add CTA', 'Viral frameworks', 'Tone check'];
 
-const aiResponses: Record<string, string> = {
-  'hook': "Here are 3 viral hook templates:\n\n1. 'Stop doing [X] if you want [Y]...'\n2. 'I tried [X] for 30 days and...'\n3. 'The secret tool nobody is talking about...'",
-  'cta': "Try these high-converting CTAs:\n\n• 'Save this for later so you don't forget'\n• 'Comment [WORD] and I'll send you the link'\n• 'Share this with a friend who needs to hear it'",
-  'framework': "The classic viral framework:\n\n1. Hook (0-3s): Pattern interrupt\n2. Re-hook (3-10s): State the problem\n3. Value (10-40s): The solution/story\n4. CTA (40-60s): Tell them what to do next",
-  'tone': "Your tone sounds authoritative but friendly. To make it more viral, try adding more urgency in the first sentence and using simpler language.",
-  'default': "That's an interesting angle! I'd suggest focusing on the emotional transformation. How will the viewer feel after watching this?",
-};
-
 export default function ChatScreen() {
-  const [messages, setMessages] = useState<Message[]>([
-    { id: '1', role: 'ai', text: "Hi! I'm your Script Co-Pilot. What kind of video are you planning today?" }
-  ]);
+  const queryClient = useQueryClient();
+  const selectedProjectId = useAppStore((s) => s.selectedProjectId);
+  const setSelectedProject = useAppStore((s) => s.setSelectedProject);
+
+  const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
-  const [isTyping, setIsTyping] = useState(false);
+  const [isStreaming, setIsStreaming] = useState(false);
+  const [scriptId, setScriptId] = useState<string | null>(null);
+  const [showProjectPicker, setShowProjectPicker] = useState(false);
   const flatListRef = useRef<FlatList>(null);
 
-  const getAIResponse = (userInput: string): string => {
-    const lowerInput = userInput.toLowerCase();
-    if (lowerInput.includes('hook')) return aiResponses.hook;
-    if (lowerInput.includes('cta')) return aiResponses.cta;
-    if (lowerInput.includes('framework')) return aiResponses.framework;
-    if (lowerInput.includes('tone')) return aiResponses.tone;
-    return aiResponses.default;
+  // Fetch projects for the picker
+  const { data: projects } = useQuery<Project[]>({
+    queryKey: ['projects'],
+    queryFn: projectsApi.list,
+  });
+
+  // Load existing script and conversation when project changes
+  useEffect(() => {
+    if (!selectedProjectId) {
+      setMessages([]);
+      setScriptId(null);
+      return;
+    }
+    loadExistingConversation(selectedProjectId);
+  }, [selectedProjectId]);
+
+  const loadExistingConversation = async (projectId: string) => {
+    try {
+      const project = await projectsApi.get(projectId);
+      const scripts = project.scripts;
+      if (scripts && scripts.length > 0) {
+        const existingScript = scripts[0];
+        setScriptId(existingScript.id);
+        // Load chat history
+        const scriptData = await scriptsApi.get(existingScript.id);
+        if (scriptData.messages && scriptData.messages.length > 0) {
+          setMessages(scriptData.messages.map((m: any) => ({
+            id: m.id,
+            role: m.role,
+            content: m.content,
+          })));
+        } else {
+          setMessages([{
+            id: 'welcome',
+            role: 'assistant',
+            content: "Hi! I'm your Script Co-Pilot. What kind of video are you planning today?",
+          }]);
+        }
+      } else {
+        setScriptId(null);
+        setMessages([{
+          id: 'welcome',
+          role: 'assistant',
+          content: "Hi! I'm your Script Co-Pilot. What kind of video are you planning today?",
+        }]);
+      }
+    } catch {
+      setMessages([{
+        id: 'welcome',
+        role: 'assistant',
+        content: "Hi! I'm your Script Co-Pilot. What kind of video are you planning today?",
+      }]);
+    }
   };
 
-  const handleSend = (text: string = input) => {
-    if (!text.trim()) return;
+  const ensureScript = async (): Promise<string> => {
+    if (scriptId) return scriptId;
+    if (!selectedProjectId) throw new Error('No project selected');
+
+    const script = await scriptsApi.create({
+      project_id: selectedProjectId,
+      title: 'Script Co-Pilot Session',
+    });
+    setScriptId(script.id);
+    return script.id;
+  };
+
+  const handleSend = useCallback(async (text: string = input) => {
+    if (!text.trim() || isStreaming) return;
+
+    if (!selectedProjectId) {
+      setShowProjectPicker(true);
+      return;
+    }
 
     const userMessage: Message = {
       id: Date.now().toString(),
       role: 'user',
-      text: text.trim(),
+      content: text.trim(),
     };
-
     setMessages(prev => [...prev, userMessage]);
     setInput('');
-    setIsTyping(true);
+    setIsStreaming(true);
 
-    setTimeout(() => {
-      const aiMessage: Message = {
-        id: (Date.now() + 1).toString(),
-        role: 'ai',
-        text: getAIResponse(text),
-      };
-      setMessages(prev => [...prev, aiMessage]);
-      setIsTyping(false);
-    }, 1500);
-  };
+    // Add placeholder AI message for streaming
+    const aiMessageId = (Date.now() + 1).toString();
+    setMessages(prev => [...prev, { id: aiMessageId, role: 'assistant', content: '' }]);
+
+    try {
+      const currentScriptId = await ensureScript();
+
+      // SSE streaming via fetch
+      const response = await fetch(`${API_URL}/api/scripts/chat`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-API-Key': API_KEY,
+          'Accept': 'text/event-stream',
+        },
+        body: JSON.stringify({
+          script_id: currentScriptId,
+          message: text.trim(),
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`API error: ${response.status}`);
+      }
+
+      const reader = response.body?.getReader();
+      if (!reader) throw new Error('No response body');
+
+      const decoder = new TextDecoder();
+      let fullText = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        const chunk = decoder.decode(value, { stream: true });
+        const lines = chunk.split('\n');
+
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          const data = line.slice(6);
+
+          if (data === '[DONE]') continue;
+
+          try {
+            const parsed = JSON.parse(data);
+            if (parsed.error) {
+              throw new Error(parsed.error);
+            }
+            if (parsed.text) {
+              fullText += parsed.text;
+              setMessages(prev =>
+                prev.map(m => m.id === aiMessageId ? { ...m, content: fullText } : m)
+              );
+            }
+          } catch (parseErr: any) {
+            if (parseErr.message && !parseErr.message.includes('JSON')) {
+              throw parseErr;
+            }
+          }
+        }
+      }
+
+      // If we got no text, show a fallback
+      if (!fullText) {
+        setMessages(prev =>
+          prev.map(m => m.id === aiMessageId
+            ? { ...m, content: "I'm having trouble connecting right now. Please try again." }
+            : m)
+        );
+      }
+    } catch (err: any) {
+      console.error('[Chat SSE Error]', err);
+      setMessages(prev => {
+        const last = prev[prev.length - 1];
+        if (last?.role === 'assistant' && !last.content) {
+          return prev.map(m => m.id === last.id
+            ? { ...m, content: `Sorry, I couldn't connect to the AI service. ${err.message || 'Please try again.'}` }
+            : m);
+        }
+        return prev;
+      });
+    } finally {
+      setIsStreaming(false);
+    }
+  }, [input, isStreaming, selectedProjectId, scriptId]);
 
   useEffect(() => {
     setTimeout(() => {
       flatListRef.current?.scrollToEnd({ animated: true });
     }, 100);
-  }, [messages, isTyping]);
+  }, [messages, isStreaming]);
+
+  const selectedProject = projects?.find(p => p.id === selectedProjectId);
 
   const renderMessage = ({ item }: { item: Message }) => (
-    <View style={[styles.messageRow, item.role === 'user' && styles.messageRowUser]}>
-      <View style={[styles.avatar, item.role === 'ai' ? styles.avatarAi : styles.avatarUser]}>
+    <View id={`chat-message-${item.id}`} style={[styles.messageRow, item.role === 'user' && styles.messageRowUser]}>
+      <View style={[styles.avatar, item.role === 'assistant' ? styles.avatarAi : styles.avatarUser]}>
         <Ionicons
-          name={item.role === 'ai' ? 'sparkles' : 'person'}
+          name={item.role === 'assistant' ? 'sparkles' : 'person'}
           size={14}
-          color={item.role === 'ai' ? '#00D4AA' : '#666'}
+          color={item.role === 'assistant' ? '#00D4AA' : '#666'}
         />
       </View>
       <View style={[
@@ -87,7 +231,7 @@ export default function ChatScreen() {
           styles.messageText,
           item.role === 'user' && styles.userMessageText
         ]}>
-          {item.text}
+          {item.content}
         </Text>
       </View>
     </View>
@@ -96,91 +240,155 @@ export default function ChatScreen() {
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       {/* Header */}
-      <View style={styles.header}>
-        <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
+      <View id="chat-header" style={styles.header}>
+        <TouchableOpacity id="chat-back-btn" style={styles.backBtn} onPress={() => router.back()}>
           <Ionicons name="arrow-back" size={24} color="#1C1C1E" />
         </TouchableOpacity>
-        <View style={styles.headerCenter}>
+        <TouchableOpacity
+          id="chat-project-selector"
+          style={styles.headerCenter}
+          onPress={() => setShowProjectPicker(!showProjectPicker)}
+        >
           <Text style={styles.headerTitle}>Script Co-Pilot</Text>
-          <View style={styles.onlineStatus}>
-            <View style={styles.onlineDot} />
-            <Text style={styles.onlineText}>Online</Text>
+          <View style={styles.projectSelector}>
+            <Text style={styles.projectName} numberOfLines={1}>
+              {selectedProject ? selectedProject.name : 'Select a project'}
+            </Text>
+            <Ionicons name="chevron-down" size={12} color="#00D4AA" />
           </View>
-        </View>
-        <TouchableOpacity style={styles.sparkleBtn}>
+        </TouchableOpacity>
+        <TouchableOpacity id="chat-sparkle-btn" style={styles.sparkleBtn}>
           <Ionicons name="sparkles" size={20} color="#00D4AA" />
         </TouchableOpacity>
       </View>
 
-      <KeyboardAvoidingView 
+      {/* Project Picker Dropdown */}
+      {showProjectPicker && (
+        <View id="chat-project-picker" style={styles.projectPicker}>
+          {(!projects || projects.length === 0) ? (
+            <Text style={styles.pickerEmpty}>No projects yet. Create one first!</Text>
+          ) : (
+            projects.map(project => (
+              <TouchableOpacity
+                key={project.id}
+                id={`chat-project-option-${project.id}`}
+                style={[
+                  styles.pickerItem,
+                  project.id === selectedProjectId && styles.pickerItemActive,
+                ]}
+                onPress={() => {
+                  setSelectedProject(project.id);
+                  setShowProjectPicker(false);
+                }}
+              >
+                <Text style={[
+                  styles.pickerItemText,
+                  project.id === selectedProjectId && styles.pickerItemTextActive,
+                ]}>
+                  {project.name}
+                </Text>
+                {project.id === selectedProjectId && (
+                  <Ionicons name="checkmark" size={16} color="#00D4AA" />
+                )}
+              </TouchableOpacity>
+            ))
+          )}
+        </View>
+      )}
+
+      <KeyboardAvoidingView
         style={styles.chatContainer}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         keyboardVerticalOffset={0}
       >
-        {/* Messages */}
-        <FlatList
-          ref={flatListRef}
-          data={messages}
-          keyExtractor={item => item.id}
-          renderItem={renderMessage}
-          contentContainerStyle={styles.messagesList}
-          ListFooterComponent={
-            isTyping ? (
-              <View style={styles.messageRow}>
-                <View style={[styles.avatar, styles.avatarAi]}>
-                  <Ionicons name="sparkles" size={14} color="#00D4AA" />
-                </View>
-                <View style={[styles.messageBubble, styles.aiBubble, styles.typingBubble]}>
-                  <View style={styles.typingDots}>
-                    <View style={styles.dot} />
-                    <View style={styles.dot} />
-                    <View style={styles.dot} />
-                  </View>
-                </View>
-              </View>
-            ) : null
-          }
-        />
-
-        {/* Input Area */}
-        <View style={styles.inputArea}>
-          {/* Quick Chips */}
-          <ScrollView 
-            horizontal 
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.chips}
-          >
-            {quickChips.map(chip => (
-              <TouchableOpacity
-                key={chip}
-                style={styles.chip}
-                onPress={() => handleSend(chip)}
-              >
-                <Text style={styles.chipText}>{chip}</Text>
-              </TouchableOpacity>
-            ))}
-          </ScrollView>
-
-          {/* Input */}
-          <View style={styles.inputRow}>
-            <TextInput
-              style={styles.input}
-              placeholder="Ask for script ideas..."
-              placeholderTextColor="#AEAEB2"
-              value={input}
-              onChangeText={setInput}
-              onSubmitEditing={() => handleSend()}
-              returnKeyType="send"
-            />
-            <TouchableOpacity
-              style={[styles.sendBtn, !input.trim() && styles.sendBtnDisabled]}
-              onPress={() => handleSend()}
-              disabled={!input.trim()}
-            >
-              <Ionicons name="send" size={18} color="#fff" />
-            </TouchableOpacity>
+        {/* No project selected state */}
+        {!selectedProjectId && (
+          <View id="chat-no-project" style={styles.noProjectContainer}>
+            <Ionicons name="chatbubbles-outline" size={48} color="#AEAEB2" />
+            <Text style={styles.noProjectTitle}>Select a Project</Text>
+            <Text style={styles.noProjectText}>
+              Tap the project name above to choose a project for your script conversation.
+            </Text>
           </View>
-        </View>
+        )}
+
+        {/* Messages */}
+        {selectedProjectId && (
+          <>
+            <FlatList
+              ref={flatListRef}
+              data={messages}
+              keyExtractor={item => item.id}
+              renderItem={renderMessage}
+              contentContainerStyle={styles.messagesList}
+              ListFooterComponent={
+                isStreaming && messages[messages.length - 1]?.content === '' ? (
+                  <View style={styles.messageRow}>
+                    <View style={[styles.avatar, styles.avatarAi]}>
+                      <Ionicons name="sparkles" size={14} color="#00D4AA" />
+                    </View>
+                    <View style={[styles.messageBubble, styles.aiBubble, styles.typingBubble]}>
+                      <View style={styles.typingDots}>
+                        <View style={styles.dot} />
+                        <View style={styles.dot} />
+                        <View style={styles.dot} />
+                      </View>
+                    </View>
+                  </View>
+                ) : null
+              }
+            />
+
+            {/* Input Area */}
+            <View id="chat-input-area" style={styles.inputArea}>
+              {/* Quick Chips */}
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.chips}
+              >
+                {quickChips.map(chip => (
+                  <TouchableOpacity
+                    key={chip}
+                    id={`chat-chip-${chip.replace(/\s/g, '-').toLowerCase()}`}
+                    style={styles.chip}
+                    onPress={() => handleSend(chip)}
+                    disabled={isStreaming}
+                  >
+                    <Text style={styles.chipText}>{chip}</Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+
+              {/* Input */}
+              <View id="chat-input-row" style={styles.inputRow}>
+                <TextInput
+                  id="chat-text-input"
+                  style={styles.input}
+                  placeholder="Ask for script ideas..."
+                  placeholderTextColor="#AEAEB2"
+                  value={input}
+                  onChangeText={setInput}
+                  onSubmitEditing={() => handleSend()}
+                  returnKeyType="send"
+                  editable={!isStreaming}
+                />
+                <TouchableOpacity
+                  id="chat-send-btn"
+                  style={[styles.sendBtn, (!input.trim() || isStreaming) && styles.sendBtnDisabled]}
+                  onPress={() => handleSend()}
+                  disabled={!input.trim() || isStreaming}
+                >
+                  {isStreaming ? (
+                    <ActivityIndicator size="small" color="#fff" />
+                  ) : (
+                    <Ionicons name="send" size={18} color="#fff" />
+                  )}
+                </TouchableOpacity>
+              </View>
+            </View>
+          </>
+        )}
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
@@ -209,30 +417,24 @@ const styles = StyleSheet.create({
   },
   headerCenter: {
     alignItems: 'center',
+    flex: 1,
   },
   headerTitle: {
     fontSize: 15,
     fontWeight: '700',
     color: '#1C1C1E',
   },
-  onlineStatus: {
+  projectSelector: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
     marginTop: 2,
   },
-  onlineDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: '#00D4AA',
-  },
-  onlineText: {
-    fontSize: 10,
-    fontWeight: '700',
+  projectName: {
+    fontSize: 11,
+    fontWeight: '600',
     color: '#00D4AA',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
+    maxWidth: 160,
   },
   sparkleBtn: {
     width: 40,
@@ -242,8 +444,59 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  projectPicker: {
+    backgroundColor: '#FFFFFF',
+    borderBottomWidth: 1,
+    borderBottomColor: '#E5E5EA',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    maxHeight: 200,
+  },
+  pickerEmpty: {
+    fontSize: 14,
+    color: '#AEAEB2',
+    textAlign: 'center',
+    paddingVertical: 16,
+  },
+  pickerItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+  },
+  pickerItemActive: {
+    backgroundColor: 'rgba(0, 212, 170, 0.08)',
+  },
+  pickerItemText: {
+    fontSize: 15,
+    color: '#1C1C1E',
+  },
+  pickerItemTextActive: {
+    color: '#00D4AA',
+    fontWeight: '600',
+  },
   chatContainer: {
     flex: 1,
+  },
+  noProjectContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 40,
+    gap: 12,
+  },
+  noProjectTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#1C1C1E',
+  },
+  noProjectText: {
+    fontSize: 14,
+    color: '#AEAEB2',
+    textAlign: 'center',
+    lineHeight: 20,
   },
   messagesList: {
     padding: 16,

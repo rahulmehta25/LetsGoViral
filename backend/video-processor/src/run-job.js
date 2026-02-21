@@ -141,11 +141,19 @@ async function main() {
     // ── 10. Generate Long-Form Edit Guidance ─────────────────────────────
     if (script && transcription) {
       try {
-        const { generateEditGuidance } = require('./services/geminiAnalyzer');
-        // Note: edit guidance uses the API service's Gemini client; call it here via direct import
-        // In production, this could be a separate step or a Pub/Sub message to the API service
-        logger.info('Skipping edit guidance in job (delegate to API service post-MVP)');
-      } catch (e) { /* Non-critical */ }
+        const { generateEditGuidance } = require('./services/editGuidance');
+        logger.info('Generating long-form edit guidance...');
+        const editGuidance = await generateEditGuidance(script, transcription);
+        if (editGuidance) {
+          await db.query(
+            'UPDATE videos SET edit_guidance = $1, updated_at = now() WHERE id = $2',
+            [JSON.stringify(editGuidance), videoId]
+          );
+          logger.info('Edit guidance saved successfully');
+        }
+      } catch (e) {
+        logger.warn(`Edit guidance generation failed (non-critical): ${e.message}`);
+      }
     }
 
     // ── 11. Mark as COMPLETED ─────────────────────────────────────────────

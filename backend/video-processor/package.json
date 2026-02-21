@@ -6,7 +6,8 @@
   "type": "commonjs",
   "scripts": {
     "start": "node src/run-job.js",
-    "dev": "nodemon src/run-job.js"
+    "dev": "nodemon src/run-job.js",
+    "test": "jest --forceExit --detectOpenHandles"
   },
   "dependencies": {
     "@google-cloud/pubsub": "^4.4.0",
@@ -20,6 +21,7 @@
     "winston": "^3.13.0"
   },
   "devDependencies": {
+    "jest": "^29.7.0",
     "nodemon": "^3.1.0"
   },
   "engines": {

@@ -4,11 +4,24 @@ export interface Clip {
   id: string;
   video_id: string;
   cdn_url: string;
+  start_time_seconds: number;
+  end_time_seconds: number;
   duration_seconds: number;
   strategic_rank: number;
   hook_score: number;
   rationale: string;
   user_approved: boolean | null;
+}
+
+export interface EditGuidanceSuggestion {
+  timestamp_seconds: number;
+  type: 'pattern_interrupt' | 'b_roll' | 'on_screen_graphic' | 'pacing_edit';
+  suggestion: string;
+}
+
+export interface EditGuidance {
+  overall_feedback: string;
+  suggestions: EditGuidanceSuggestion[];
 }
 
 export interface Video {
@@ -20,6 +33,7 @@ export interface Video {
     | 'ANALYZING' | 'CLIPPING' | 'COMPLETED' | 'FAILED';
   duration_seconds: number | null;
   transcription: string | null;
+  edit_guidance: EditGuidance | null;
   clips: Clip[];
 }
 

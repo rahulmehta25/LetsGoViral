@@ -11,44 +11,70 @@
     "lint": "eslint . --ext .js,.jsx,.ts,.tsx"
   },
   "dependencies": {
+    "@babel/preset-typescript": "^7.28.5",
+    "@expo/vector-icons": "^14.0.4",
+    "@react-navigation/native": "^6.1.18",
+    "@tanstack/react-query": "^5.56.2",
+    "axios": "^1.7.9",
     "expo": "~53.0.0",
-    "expo-router": "~4.0.0",
-    "expo-status-bar": "~2.0.0",
-    "expo-image-picker": "~16.0.0",
-    "expo-file-system": "~18.0.0",
     "expo-av": "~15.0.0",
-    "expo-media-library": "~17.0.0",
     "expo-background-fetch": "~13.0.0",
-    "expo-task-manager": "~12.0.0",
+    "expo-file-system": "~18.0.0",
+    "expo-image-picker": "~16.0.0",
+    "expo-media-library": "~17.0.0",
+    "expo-router": "~4.0.0",
     "expo-secure-store": "~14.0.0",
-    "react": "18.3.2",
+    "expo-status-bar": "~2.0.0",
+    "expo-task-manager": "~12.0.0",
+    "nativewind": "^4.1.23",
+    "react": "18.2.0",
     "react-native": "0.76.5",
+    "react-native-gesture-handler": "~2.20.2",
+    "react-native-reanimated": "~3.16.1",
     "react-native-safe-area-context": "4.12.0",
     "react-native-screens": "~4.4.0",
-    "@react-navigation/native": "^6.1.18",
-    "axios": "^1.7.9",
-    "@tanstack/react-query": "^5.56.2",
-    "zustand": "^5.0.1",
-    "nativewind": "^4.1.23",
+    "react-native-svg": "15.8.0",
+    "react-native-worklets": "^0.7.4",
     "tailwindcss": "^3.4.17",
-    "react-native-reanimated": "~3.16.1",
-    "react-native-gesture-handler": "~2.20.2",
-    "@expo/vector-icons": "^14.0.4",
-    "react-native-svg": "15.8.0"
+    "zustand": "^5.0.1"
   },
   "devDependencies": {
     "@babel/core": "^7.25.2",
+    "@testing-library/react-native": "^12.7.2",
+    "@types/jest": "^30.0.0",
     "@types/react": "~18.3.12",
     "@types/react-native": "~0.73.0",
-    "typescript": "^5.3.3",
+    "eslint": "^8.57.0",
+    "eslint-config-expo": "^8.0.1",
     "jest": "^29.7.0",
     "jest-expo": "~53.0.0",
-    "@testing-library/react-native": "^12.7.2",
-    "eslint": "^8.57.0",
-    "eslint-config-expo": "^8.0.1"
+    "typescript": "^5.3.3"
   },
   "jest": {
-    "preset": "jest-expo"
+    "projects": [
+      {
+        "displayName": "unit",
+        "testMatch": [
+          "<rootDir>/__tests__/**/*.test.ts"
+        ],
+        "transform": {
+          "^.+\\.tsx?$": [
+            "babel-jest",
+            {
+              "presets": [
+                "@babel/preset-typescript"
+              ]
+            }
+          ]
+        },
+        "transformIgnorePatterns": [
+          "node_modules/(?!(expo|@expo|expo-secure-store)/)"
+        ],
+        "moduleNameMapper": {
+          "^@/(.*)$": "<rootDir>/$1"
+        }
+      }
+    ]
   },
   "private": true
 }

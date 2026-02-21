@@ -13,14 +13,12 @@ import { Colors } from '@/constants/Colors';
 import type { Project } from '@/store';
 
 function ProjectCard({ project, onPress }: { project: Project; onPress: () => void }) {
-  const statusColor = {
-    Ready:      Colors.success,
-    Processing: Colors.warning,
-    Draft:      Colors.textTertiary,
-  }[project.status as string] ?? Colors.textTertiary;
+  const videoCount = project.video_count ?? 0;
+  const statusLabel = videoCount > 0 ? 'Ready' : 'Draft';
+  const statusColor = videoCount > 0 ? Colors.success : Colors.textTertiary;
 
   return (
-    <TouchableOpacity style={styles.card} onPress={onPress} activeOpacity={0.7}>
+    <TouchableOpacity id={`project-card-${project.id}`} style={styles.card} onPress={onPress} activeOpacity={0.7}>
       <View style={styles.cardThumbnail}>
         <Ionicons name="videocam" size={28} color={Colors.textTertiary} />
       </View>
@@ -34,10 +32,10 @@ function ProjectCard({ project, onPress }: { project: Project; onPress: () => vo
         <View style={styles.cardMeta}>
           <View style={[styles.statusDot, { backgroundColor: statusColor }]} />
           <Text style={[styles.statusText, { color: statusColor }]}>
-            {project.status ?? 'Draft'}
+            {statusLabel}
           </Text>
           <Text style={styles.dateText}>
-            {'  ·  '}{project.video_count ?? 0} video{project.video_count !== 1 ? 's' : ''}
+            {'  ·  '}{videoCount} video{videoCount !== 1 ? 's' : ''}
           </Text>
         </View>
       </View>
@@ -59,11 +57,12 @@ export default function ProjectsScreen() {
   }
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
+    <SafeAreaView id="projects-container" style={styles.container} edges={['top']}>
       {/* Header */}
-      <View style={styles.header}>
+      <View id="projects-header" style={styles.header}>
         <Text style={styles.headerTitle}>My Projects</Text>
         <TouchableOpacity
+          id="projects-add-btn"
           style={styles.addBtn}
           onPress={() => router.push('/upload')}
         >

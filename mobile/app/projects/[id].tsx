@@ -10,7 +10,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { videosApi } from '@/api/client';
 import { useAppStore } from '@/store';
 import { Colors } from '@/constants/Colors';
-import type { Video, Clip } from '@/store';
+import type { Video, Clip, EditGuidanceSuggestion } from '@/store';
 
 function ClipCard({ clip, onPress }: { clip: Clip; onPress: () => void }) {
   const statusColor =
@@ -101,11 +101,11 @@ export default function ProjectDetailScreen() {
   const status = video?.processing_status;
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
+    <SafeAreaView id="project-detail-container" style={styles.container} edges={['top']}>
       <ScrollView contentContainerStyle={styles.scroll}>
         {/* Header */}
-        <View style={styles.header}>
-          <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
+        <View id="project-detail-header" style={styles.header}>
+          <TouchableOpacity id="project-detail-back-btn" onPress={() => router.back()} style={styles.backBtn}>
             <Ionicons name="arrow-back" size={22} color={Colors.text} />
           </TouchableOpacity>
           <Text style={styles.headerTitle} numberOfLines={1}>Project Detail</Text>
@@ -158,14 +158,43 @@ export default function ProjectDetailScreen() {
 
         {/* Edit Guidance */}
         {video?.edit_guidance && (
-          <View style={styles.guidanceCard}>
-            <View style={styles.guidanceHeader}>
+          <View id="project-edit-guidance" style={styles.guidanceCard}>
+            <View id="project-edit-guidance-header" style={styles.guidanceHeader}>
               <Ionicons name="sparkles" size={18} color={Colors.primary} />
               <Text style={styles.guidanceTitle}>Long-Form Edit Guidance</Text>
             </View>
             <Text style={styles.guidanceText}>
               {video.edit_guidance.overall_feedback}
             </Text>
+            {video.edit_guidance.suggestions && video.edit_guidance.suggestions.length > 0 && (
+              <View id="project-edit-suggestions" style={styles.suggestionsContainer}>
+                {video.edit_guidance.suggestions.map((s: EditGuidanceSuggestion, idx: number) => (
+                  <View key={idx} id={`project-suggestion-${idx}`} style={styles.suggestionItem}>
+                    <View style={styles.suggestionTimestamp}>
+                      <Text style={styles.timestampText}>
+                        {Math.floor(s.timestamp_seconds / 60)}:{String(Math.floor(s.timestamp_seconds % 60)).padStart(2, '0')}
+                      </Text>
+                    </View>
+                    <View style={styles.suggestionContent}>
+                      <View style={[styles.suggestionTypeBadge, {
+                        backgroundColor: s.type === 'pattern_interrupt' ? '#FFF3E0' :
+                          s.type === 'b_roll' ? '#E3F2FD' :
+                          s.type === 'on_screen_graphic' ? '#F3E5F5' : '#E8F5E9',
+                      }]}>
+                        <Text style={[styles.suggestionTypeText, {
+                          color: s.type === 'pattern_interrupt' ? '#E65100' :
+                            s.type === 'b_roll' ? '#1565C0' :
+                            s.type === 'on_screen_graphic' ? '#7B1FA2' : '#2E7D32',
+                        }]}>
+                          {s.type.replace(/_/g, ' ')}
+                        </Text>
+                      </View>
+                      <Text style={styles.suggestionText}>{s.suggestion}</Text>
+                    </View>
+                  </View>
+                ))}
+              </View>
+            )}
           </View>
         )}
 
@@ -205,6 +234,14 @@ const styles = StyleSheet.create({
   guidanceHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10 },
   guidanceTitle:  { fontSize: 15, fontWeight: '700', color: Colors.text },
   guidanceText:   { fontSize: 14, color: Colors.textSecondary, lineHeight: 20 },
+  suggestionsContainer: { marginTop: 14, gap: 10 },
+  suggestionItem: { flexDirection: 'row', gap: 10 },
+  suggestionTimestamp: { width: 42, paddingTop: 4 },
+  timestampText: { fontSize: 12, fontWeight: '700', color: Colors.primary, fontVariant: ['tabular-nums'] },
+  suggestionContent: { flex: 1 },
+  suggestionTypeBadge: { alignSelf: 'flex-start', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6, marginBottom: 4 },
+  suggestionTypeText: { fontSize: 10, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.3 },
+  suggestionText: { fontSize: 13, color: Colors.textSecondary, lineHeight: 18 },
   sectionHeader:  { paddingHorizontal: 16, paddingBottom: 10, paddingTop: 8 },
   sectionTitle:   { fontSize: 17, fontWeight: '700', color: Colors.text },
   sectionSub:     { fontSize: 13, color: Colors.textSecondary, marginTop: 2 },

@@ -36,28 +36,28 @@ router.post('/', async (req, res) => {
 
 // GET /api/projects/:id
 router.get('/:id', async (req, res) => {
-  const { rows } = await db.query(
-    `SELECT p.*,
-            COALESCE(
-              json_agg(
-                json_build_object(
-                  'id', v.id,
-                  'original_filename', v.original_filename,
-                  'processing_status', v.processing_status,
-                  'duration_seconds',  v.duration_seconds,
-                  'created_at',        v.created_at
-                )
-              ) FILTER (WHERE v.id IS NOT NULL),
-              '[]'
-            ) AS videos
-     FROM projects p
-     LEFT JOIN videos v ON v.project_id = p.id
-     WHERE p.id = $1
-     GROUP BY p.id`,
-    [req.params.id]
-  );
-  if (!rows[0]) return res.status(404).json({ error: 'Project not found' });
-  res.json({ data: rows[0] });
+  const [projectRes, videosRes, scriptsRes] = await Promise.all([
+    db.query('SELECT * FROM projects WHERE id = $1', [req.params.id]),
+    db.query(
+      `SELECT id, original_filename, processing_status, duration_seconds, created_at
+       FROM videos WHERE project_id = $1 ORDER BY created_at DESC`,
+      [req.params.id]
+    ),
+    db.query(
+      `SELECT id, title, created_at FROM scripts WHERE project_id = $1 ORDER BY created_at DESC`,
+      [req.params.id]
+    ),
+  ]);
+
+  if (!projectRes.rows[0]) return res.status(404).json({ error: 'Project not found' });
+
+  res.json({
+    data: {
+      ...projectRes.rows[0],
+      videos: videosRes.rows,
+      scripts: scriptsRes.rows,
+    },
+  });
 });
 
 // PUT /api/projects/:id
