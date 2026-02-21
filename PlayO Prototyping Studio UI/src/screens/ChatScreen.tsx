@@ -4,23 +4,16 @@ import {
   Sparkles,
   Send,
   User,
-  Bot,
-  MoreHorizontal } from
+  Bot } from
 'lucide-react';
 import { Card } from '../components/ui/Card';
+import { useChat } from '../hooks/useChat';
 interface ChatScreenProps {
   onNavigate: (screen: string) => void;
 }
 export function ChatScreen({ onNavigate }: ChatScreenProps) {
-  const [messages, setMessages] = useState([
-  {
-    id: 1,
-    role: 'ai',
-    text: "Hi! I'm your Script Co-Pilot. What kind of video are you planning today?"
-  }]
-  );
+  const { messages, isStreaming, error, sendMessage } = useChat();
   const [input, setInput] = useState('');
-  const [isTyping, setIsTyping] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({
@@ -29,51 +22,16 @@ export function ChatScreen({ onNavigate }: ChatScreenProps) {
   };
   useEffect(() => {
     scrollToBottom();
-  }, [messages, isTyping]);
-  const getAIResponse = (userInput: string) => {
-    const lowerInput = userInput.toLowerCase();
-    if (lowerInput.includes('hook')) {
-      return "Here are 3 viral hook templates:\n\n1. 'Stop doing [X] if you want [Y]...'\n2. 'I tried [X] for 30 days and...'\n3. 'The secret tool nobody is talking about...'";
-    }
-    if (lowerInput.includes('cta')) {
-      return "Try these high-converting CTAs:\n\n• 'Save this for later so you don't forget'\n• 'Comment [WORD] and I'll send you the link'\n• 'Share this with a friend who needs to hear it'";
-    }
-    if (lowerInput.includes('framework')) {
-      return 'The classic viral framework:\n\n1. Hook (0-3s): Pattern interrupt\n2. Re-hook (3-10s): State the problem\n3. Value (10-40s): The solution/story\n4. CTA (40-60s): Tell them what to do next';
-    }
-    if (lowerInput.includes('tone')) {
-      return 'Your tone sounds authoritative but friendly. To make it more viral, try adding more urgency in the first sentence and using simpler language.';
-    }
-    return "That's an interesting angle! I'd suggest focusing on the emotional transformation. How will the viewer feel after watching this?";
-  };
+  }, [messages, isStreaming]);
   const handleSend = (text: string = input) => {
     if (!text.trim()) return;
-    setMessages((prev) => [
-    ...prev,
-    {
-      id: Date.now(),
-      role: 'user',
-      text
-    }]
-    );
+    sendMessage(text.trim());
     setInput('');
-    setIsTyping(true);
-    setTimeout(() => {
-      setIsTyping(false);
-      setMessages((prev) => [
-      ...prev,
-      {
-        id: Date.now() + 1,
-        role: 'ai',
-        text: getAIResponse(text)
-      }]
-      );
-    }, 1500);
   };
   return (
     <div className="fixed inset-0 bg-[#F5F5F5] flex flex-col animate-slide-up">
       {/* Top Bar */}
-      <header className="h-16 bg-white border-b border-gray-200 px-4 flex items-center justify-between z-20">
+      <header className="h-16 bg-white border-b border-gray-200 px-4 flex items-center justify-between z-20 shrink-0">
         <button
           onClick={() => onNavigate('projects')}
           className="p-2 hover:bg-gray-100 rounded-full transition-colors">
@@ -93,7 +51,8 @@ export function ChatScreen({ onNavigate }: ChatScreenProps) {
       </header>
 
       {/* Chat Area */}
-      <main className="flex-1 overflow-y-auto p-4 space-y-4 pb-32">
+      <main className="flex-1 overflow-y-auto">
+        <div className="max-w-3xl mx-auto w-full p-4 space-y-4">
         {messages.map((msg) =>
         <div
           key={msg.id}
@@ -112,7 +71,7 @@ export function ChatScreen({ onNavigate }: ChatScreenProps) {
           </div>
         )}
 
-        {isTyping &&
+        {isStreaming && messages[messages.length - 1]?.text === '' &&
         <div className="flex gap-3 animate-fade-in">
             <div className="w-8 h-8 rounded-full bg-white border border-gray-200 text-[#00D4AA] flex items-center justify-center flex-shrink-0">
               <Bot size={16} />
@@ -139,11 +98,25 @@ export function ChatScreen({ onNavigate }: ChatScreenProps) {
             </div>
           </div>
         }
+        {error &&
+        <div className="flex gap-3 animate-fade-in">
+            <div className="w-8 h-8 rounded-full bg-red-100 text-red-500 flex items-center justify-center flex-shrink-0">
+              <Bot size={16} />
+            </div>
+            <div className="max-w-[80%] p-4 rounded-2xl rounded-tl-none text-sm bg-red-50 border border-red-200 text-red-700">
+              <p className="font-semibold mb-1">Connection error</p>
+              <p className="font-mono text-xs">{error}</p>
+              <p className="mt-2 text-xs text-red-500">Check that VITE_GEMINI_API_KEY is set in your .env file and restart the dev server.</p>
+            </div>
+          </div>
+        }
         <div ref={messagesEndRef} />
+        </div>
       </main>
 
       {/* Input Area */}
-      <div className="absolute bottom-20 left-0 right-0 p-4 bg-gradient-to-t from-[#F5F5F5] via-[#F5F5F5] to-transparent">
+      <div className="shrink-0 border-t border-gray-200 bg-white/95 backdrop-blur-md">
+        <div className="max-w-3xl mx-auto w-full p-4 pb-24">
         {/* Quick Chips */}
         <div className="flex gap-2 overflow-x-auto pb-3 no-scrollbar">
           {['Hook ideas', 'Add CTA', 'Viral frameworks', 'Tone check'].map(
@@ -151,6 +124,7 @@ export function ChatScreen({ onNavigate }: ChatScreenProps) {
             <button
               key={chip}
               onClick={() => handleSend(chip)}
+              disabled={isStreaming}
               className="px-4 py-2 bg-white border border-gray-200 rounded-full text-xs font-medium text-gray-600 shadow-sm hover:border-[#00D4AA] hover:text-[#00D4AA] transition-all hover:-translate-y-0.5 whitespace-nowrap">
 
                 {chip}
@@ -167,18 +141,24 @@ export function ChatScreen({ onNavigate }: ChatScreenProps) {
             type="text"
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && handleSend()}
+            onKeyDown={(e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+              e.preventDefault();
+              handleSend();
+            }
+          }}
             placeholder="Ask for script ideas..."
             className="flex-1 bg-transparent border-none focus:ring-0 px-4 text-sm outline-none" />
 
           <button
             onClick={() => handleSend()}
-            disabled={!input.trim()}
+            disabled={!input.trim() || isStreaming}
             className="w-10 h-10 bg-[#00D4AA] rounded-full flex items-center justify-center text-white hover:bg-[#00B390] transition-all shadow-md disabled:opacity-50 disabled:cursor-not-allowed active:scale-95">
 
             <Send size={18} className="ml-0.5" />
           </button>
         </Card>
+        </div>
       </div>
     </div>);
 

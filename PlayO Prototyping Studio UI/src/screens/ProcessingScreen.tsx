@@ -1,92 +1,98 @@
 import React, { useEffect, useState } from 'react';
 import { Card } from '../components/ui/Card';
-import { Project, Clip } from '../App';
+import { webApi } from '../lib/api';
+import { VideoDetails } from '../types';
+
 interface ProcessingScreenProps {
   onNavigate: (screen: string) => void;
-  project: Project;
-  onComplete: (clips: Clip[]) => void;
+  videoId: string | null;
+  projectName: string;
+  onComplete: (video: VideoDetails) => Promise<void>;
+  onError: (message: string) => void;
 }
+
+const STATUS_STEPS: Record<string, number> = {
+  PENDING: 1,
+  UPLOADED: 1,
+  PROCESSING: 2,
+  TRANSCRIBING: 3,
+  ANALYZING: 3,
+  COMPLETED: 4,
+  FAILED: 4,
+};
+
 export function ProcessingScreen({
   onNavigate,
-  project,
-  onComplete
+  videoId,
+  projectName,
+  onComplete,
+  onError,
 }: ProcessingScreenProps) {
-  const [progress, setProgress] = useState(0);
-  const [step, setStep] = useState(1);
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setProgress((prev) => {
-        if (prev >= 100) {
-          clearInterval(interval);
-          // Generate mock clips
-          const newClips: Clip[] = [
-          {
-            id: Date.now(),
-            rank: 1,
-            score: 9.5,
-            duration: '0:32',
-            status: 'pending',
-            rationale: 'Perfect hook with high retention probability.',
-            title: 'Viral Clip #1'
-          },
-          {
-            id: Date.now() + 1,
-            rank: 2,
-            score: 8.8,
-            duration: '0:45',
-            status: 'pending',
-            rationale: 'Strong emotional connection in middle segment.',
-            title: 'Viral Clip #2'
-          },
-          {
-            id: Date.now() + 2,
-            rank: 3,
-            score: 7.2,
-            duration: '0:18',
-            status: 'pending',
-            rationale: 'Short and punchy, good for Stories.',
-            title: 'Viral Clip #3'
-          }];
+  const [progress, setProgress] = useState(5);
+  const [status, setStatus] = useState('PENDING');
 
-          onComplete(newClips);
-          setTimeout(() => onNavigate('detail'), 500);
-          return 100;
-        }
-        return prev + 1;
-      });
-    }, 50); // Simulating 5 seconds processing
-    return () => clearInterval(interval);
-  }, [onNavigate, onComplete]);
   useEffect(() => {
-    if (progress > 30) setStep(2);
-    if (progress > 60) setStep(3);
-    if (progress > 90) setStep(4);
-  }, [progress]);
+    if (!videoId) return;
+
+    const timer = setInterval(async () => {
+      try {
+        const video = await webApi.videos.get(videoId);
+        setStatus(video.processing_status);
+
+        if (video.processing_status === 'COMPLETED') {
+          setProgress(100);
+          clearInterval(timer);
+          await onComplete(video);
+          return;
+        }
+
+        if (video.processing_status === 'FAILED') {
+          clearInterval(timer);
+          onError('Video processing failed');
+          return;
+        }
+
+        setProgress((prev) => Math.min(prev + 7, 95));
+      } catch (error) {
+        clearInterval(timer);
+        onError(error instanceof Error ? error.message : 'Failed to poll processing status');
+      }
+    }, 2500);
+
+    return () => clearInterval(timer);
+  }, [videoId, onComplete, onError]);
+
+  const step = STATUS_STEPS[status] || 1;
+
   const getStatusText = () => {
-    if (progress < 30) return 'Uploading video...';
-    if (progress < 60) return 'Transcribing audio...';
-    if (progress < 90) return 'Finding viral moments...';
-    return 'Finalizing clips...';
+    switch (status) {
+      case 'PENDING':
+      case 'UPLOADED':
+        return 'Uploading video...';
+      case 'PROCESSING':
+        return 'Processing scenes...';
+      case 'TRANSCRIBING':
+        return 'Transcribing audio...';
+      case 'ANALYZING':
+        return 'Finding viral moments...';
+      case 'COMPLETED':
+        return 'Finalized';
+      case 'FAILED':
+        return 'Processing failed';
+      default:
+        return 'Processing...';
+    }
   };
+
   return (
     <div className="fixed inset-0 bg-[#F5F5F5] flex flex-col items-center justify-center p-6 animate-fade-in">
       <Card className="w-full max-w-sm bg-white shadow-xl rounded-[32px] overflow-hidden text-center">
         <div className="p-10 flex flex-col items-center gap-8">
-          <h2 className="text-lg font-bold text-gray-900 truncate max-w-full px-4">
-            {project.name}
-          </h2>
+          <h2 className="text-lg font-bold text-gray-900 truncate max-w-full px-4">{projectName}</h2>
 
-          {/* Progress Circle */}
           <div className="relative w-32 h-32 flex items-center justify-center">
             <svg className="w-full h-full transform -rotate-90">
-              <circle
-                cx="64"
-                cy="64"
-                r="60"
-                stroke="#f3f4f6"
-                strokeWidth="8"
-                fill="none" />
-
+              <circle cx="64" cy="64" r="60" stroke="#f3f4f6" strokeWidth="8" fill="none" />
               <circle
                 cx="64"
                 cy="64"
@@ -96,36 +102,27 @@ export function ProcessingScreen({
                 fill="none"
                 strokeDasharray={2 * Math.PI * 60}
                 strokeDashoffset={2 * Math.PI * 60 * (1 - progress / 100)}
-                className="transition-all duration-200 ease-linear"
-                strokeLinecap="round" />
-
+                className="transition-all duration-700 ease-linear"
+                strokeLinecap="round"
+              />
             </svg>
             <div className="absolute inset-0 flex items-center justify-center">
-              <span className="text-2xl font-bold text-gray-900">
-                {progress}%
-              </span>
+              <span className="text-2xl font-bold text-gray-900">{progress}%</span>
             </div>
           </div>
 
           <div className="space-y-2">
-            <h3 className="text-xl font-bold text-gray-900 animate-pulse">
-              {getStatusText()}
-            </h3>
-            <p className="text-sm text-gray-500 font-medium">
-              Step {step} of 4
-            </p>
+            <h3 className="text-xl font-bold text-gray-900">{getStatusText()}</h3>
+            <p className="text-sm text-gray-500 font-medium">Step {step} of 4</p>
           </div>
         </div>
 
         <div className="bg-gray-50 p-4 border-t border-gray-100">
-          <button
-            onClick={() => onNavigate('projects')}
-            className="text-sm text-gray-400 hover:text-gray-600 font-medium transition-colors">
-
-            Cancel Processing
+          <button onClick={() => onNavigate('projects')} className="text-sm text-gray-400 hover:text-gray-600 font-medium transition-colors">
+            Back to Projects
           </button>
         </div>
       </Card>
-    </div>);
-
+    </div>
+  );
 }

@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Home, Upload, MessageSquare, Film, LayoutGrid } from 'lucide-react';
 import { SplashScreen } from './screens/SplashScreen';
 import { OnboardingScreen } from './screens/OnboardingScreen';
 import { ProjectsScreen } from './screens/ProjectsScreen';
@@ -7,203 +8,141 @@ import { ProcessingScreen } from './screens/ProcessingScreen';
 import { ChatScreen } from './screens/ChatScreen';
 import { ProjectDetailScreen } from './screens/ProjectDetailScreen';
 import { ClipReviewerScreen } from './screens/ClipReviewerScreen';
-import { Home, Upload, MessageSquare, Film, LayoutGrid } from 'lucide-react';
 import { Toast, ToastType } from './components/ui/Toast';
-export type Screen =
-'splash' |
-'onboarding' |
-'projects' |
-'upload' |
-'processing' |
-'chat' |
-'detail' |
-'reviewer';
-export interface Clip {
-  id: number;
-  rank: number;
-  score: number;
-  duration: string;
-  status: 'pending' | 'approved' | 'rejected';
-  rationale: string;
-  title: string;
-}
-export interface Project {
-  id: number;
-  name: string;
-  status: 'Draft' | 'Processing' | 'Ready';
-  clips: Clip[];
-  date: string;
-  thumbnail: string;
-}
-const initialProjects: Project[] = [
-{
-  id: 1,
-  name: 'Podcast Episode #42',
-  status: 'Ready',
-  date: '2h ago',
-  thumbnail: 'bg-purple-100',
-  clips: [
-  {
-    id: 101,
-    rank: 1,
-    score: 9.2,
-    duration: '0:24',
-    status: 'approved',
-    rationale: 'Strong hook with high emotional valence.',
-    title: 'Viral Clip #1'
-  },
-  {
-    id: 102,
-    rank: 2,
-    score: 8.5,
-    duration: '0:45',
-    status: 'pending',
-    rationale: 'Good pacing but CTA is weak.',
-    title: 'Viral Clip #2'
-  },
-  {
-    id: 103,
-    rank: 3,
-    score: 7.8,
-    duration: '0:15',
-    status: 'rejected',
-    rationale: 'Audio clarity issues detected.',
-    title: 'Viral Clip #3'
-  }]
-
-},
-{
-  id: 2,
-  name: 'Product Demo Walkthrough',
-  status: 'Processing',
-  date: '5h ago',
-  thumbnail: 'bg-blue-100',
-  clips: []
-},
-{
-  id: 3,
-  name: 'Q&A Session Live',
-  status: 'Draft',
-  date: '1d ago',
-  thumbnail: 'bg-orange-100',
-  clips: []
-}];
+import { webApi } from './lib/api';
+import { Clip, ProjectSummary, Screen, VideoDetails } from './types';
 
 const navItems = [
-{
-  id: 'projects',
-  label: 'Home',
-  icon: Home
-},
-{
-  id: 'upload',
-  label: 'Upload',
-  icon: Upload
-},
-{
-  id: 'chat',
-  label: 'Co-Pilot',
-  icon: MessageSquare
-},
-{
-  id: 'detail',
-  label: 'Detail',
-  icon: LayoutGrid
-},
-{
-  id: 'reviewer',
-  label: 'Review',
-  icon: Film
-}];
+  { id: 'projects', label: 'Home', icon: Home },
+  { id: 'upload', label: 'Upload', icon: Upload },
+  { id: 'chat', label: 'Co-Pilot', icon: MessageSquare },
+  { id: 'detail', label: 'Detail', icon: LayoutGrid },
+  { id: 'reviewer', label: 'Review', icon: Film },
+] as const;
 
 export function App() {
   const [currentScreen, setCurrentScreen] = useState<Screen>('splash');
-  const [projects, setProjects] = useState<Project[]>(initialProjects);
-  const [currentProjectId, setCurrentProjectId] = useState<number | null>(null);
-  const [toast, setToast] = useState<{
-    message: string;
-    type: ToastType;
-    visible: boolean;
-  }>({
-    message: '',
-    type: 'info',
-    visible: false
-  });
+  const [projects, setProjects] = useState<ProjectSummary[]>([]);
+  const [isLoadingProjects, setIsLoadingProjects] = useState(false);
+  const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
+  const [currentVideoId, setCurrentVideoId] = useState<string | null>(null);
+  const [currentVideo, setCurrentVideo] = useState<VideoDetails | null>(null);
+  const [reviewerClipIndex, setReviewerClipIndex] = useState(0);
+  const [toast, setToast] = useState({ message: '', type: 'info' as ToastType, visible: false });
+
   const showToast = (message: string, type: ToastType = 'info') => {
-    setToast({
-      message,
-      type,
-      visible: true
+    setToast({ message, type, visible: true });
+  };
+
+  const hideToast = () => setToast((prev) => ({ ...prev, visible: false }));
+
+  const loadProjects = async () => {
+    setIsLoadingProjects(true);
+    try {
+      const data = await webApi.projects.list();
+      setProjects(data);
+      if (!currentProjectId && data[0]) setCurrentProjectId(data[0].id);
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Failed to load projects', 'error');
+    } finally {
+      setIsLoadingProjects(false);
+    }
+  };
+
+  useEffect(() => {
+    if (currentScreen === 'projects') {
+      void loadProjects();
+    }
+  }, [currentScreen]);
+
+  const loadProjectVideo = async (projectId: string) => {
+    const details = await webApi.projects.get(projectId);
+    const firstVideo = details.videos[0];
+
+    if (!firstVideo) {
+      setCurrentVideo(null);
+      setCurrentVideoId(null);
+      return;
+    }
+
+    setCurrentVideoId(firstVideo.id);
+    const video = await webApi.videos.get(firstVideo.id);
+    setCurrentVideo(video);
+  };
+
+  useEffect(() => {
+    if (!currentProjectId) return;
+    if (currentScreen !== 'detail' && currentScreen !== 'reviewer') return;
+
+    void loadProjectVideo(currentProjectId).catch((error) => {
+      showToast(error instanceof Error ? error.message : 'Failed to load project details', 'error');
     });
-  };
-  const hideToast = () => {
-    setToast((prev) => ({
-      ...prev,
-      visible: false
-    }));
-  };
+  }, [currentProjectId, currentScreen]);
+
   const navigateTo = (screen: string) => {
-    setCurrentScreen(screen as Screen);
+    const nextScreen = screen as Screen;
+    if ((nextScreen === 'detail' || nextScreen === 'reviewer') && !currentProjectId) {
+      showToast('Select or create a project first', 'info');
+      return;
+    }
+    setCurrentScreen(nextScreen);
   };
-  const handleAddProject = (name: string) => {
-    const newProject: Project = {
-      id: Date.now(),
-      name: name || 'Untitled Project',
-      status: 'Processing',
-      date: 'Just now',
-      thumbnail: 'bg-green-100',
-      clips: []
-    };
-    setProjects([newProject, ...projects]);
-    setCurrentProjectId(newProject.id);
-    navigateTo('processing');
+
+  const currentProject = useMemo(
+    () => projects.find((project) => project.id === currentProjectId) || null,
+    [projects, currentProjectId],
+  );
+
+  const handleProjectSelected = async (projectId: string) => {
+    setCurrentProjectId(projectId);
+    try {
+      const details = await webApi.projects.get(projectId);
+      const video = details.videos[0];
+      if (video) {
+        setCurrentVideoId(video.id);
+        setCurrentScreen(video.processing_status === 'COMPLETED' ? 'detail' : 'processing');
+      } else {
+        setCurrentScreen('upload');
+      }
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Unable to open project', 'error');
+    }
   };
-  const handleUpdateProjectStatus = (
-  id: number,
-  status: Project['status'],
-  clips?: Clip[]) =>
-  {
-    setProjects(
-      projects.map((p) =>
-      p.id === id ?
-      {
-        ...p,
-        status,
-        clips: clips || p.clips
-      } :
-      p
-      )
-    );
+
+  const handleUploadComplete = async (projectId: string, videoId: string | null) => {
+    setCurrentProjectId(projectId);
+    setCurrentVideoId(videoId);
+    await loadProjects();
+    setCurrentScreen(videoId ? 'processing' : 'detail');
   };
-  const handleUpdateClipStatus = (
-  projectId: number,
-  clipId: number,
-  status: Clip['status']) =>
-  {
-    setProjects(
-      projects.map((p) => {
-        if (p.id === projectId) {
-          return {
-            ...p,
-            clips: p.clips.map((c) =>
-            c.id === clipId ?
-            {
-              ...c,
-              status
-            } :
-            c
-            )
-          };
-        }
-        return p;
-      })
-    );
-    if (status === 'approved') showToast('Clip approved!', 'success');
-    if (status === 'rejected') showToast('Clip rejected', 'info');
+
+  const handleProcessingComplete = async (video: VideoDetails) => {
+    setCurrentVideo(video);
+    setCurrentVideoId(video.id);
+    await loadProjects();
+    setCurrentScreen('detail');
   };
-  const currentProject =
-  projects.find((p) => p.id === currentProjectId) || projects[0];
-  // Render current screen with transition
+
+  const handleClipApproval = async (clipId: string, approved: boolean) => {
+    try {
+      await webApi.clips.updateApproval(clipId, approved);
+      if (currentVideoId) {
+        const refreshed = await webApi.videos.get(currentVideoId);
+        setCurrentVideo(refreshed);
+      }
+      showToast(approved ? 'Clip approved' : 'Clip rejected', 'success');
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Failed to update clip', 'error');
+    }
+  };
+
+  const openReviewer = (clip: Clip) => {
+    if (!currentVideo) return;
+    const index = currentVideo.clips.findIndex((item) => item.id === clip.id);
+    setReviewerClipIndex(index >= 0 ? index : 0);
+    setCurrentScreen('reviewer');
+  };
+
   const renderScreen = () => {
     switch (currentScreen) {
       case 'splash':
@@ -214,99 +153,91 @@ export function App() {
         return (
           <ProjectsScreen
             projects={projects}
+            isLoading={isLoadingProjects}
+            onRefresh={loadProjects}
             onNavigate={navigateTo}
-            onSelectProject={(id) => setCurrentProjectId(id)} />);
-
-
+            onSelectProject={handleProjectSelected}
+          />
+        );
       case 'upload':
         return (
           <UploadScreen
             onNavigate={navigateTo}
-            onStartProcessing={handleAddProject} />);
-
-
+            onComplete={handleUploadComplete}
+            defaultName={currentProject?.name || ''}
+          />
+        );
       case 'processing':
         return (
           <ProcessingScreen
             onNavigate={navigateTo}
-            project={currentProject}
-            onComplete={(clips) =>
-            handleUpdateProjectStatus(currentProject.id, 'Ready', clips)
-            } />);
-
-
+            videoId={currentVideoId}
+            projectName={currentProject?.name || 'Project'}
+            onComplete={handleProcessingComplete}
+            onError={(message) => showToast(message, 'error')}
+          />
+        );
       case 'chat':
-        return <ChatScreen onNavigate={navigateTo} />;
+        return (
+          <ChatScreen
+            onNavigate={navigateTo}
+            projectId={currentProjectId}
+            onError={(message) => showToast(message, 'error')}
+          />
+        );
       case 'detail':
         return (
           <ProjectDetailScreen
             onNavigate={navigateTo}
-            project={currentProject}
-            onUpdateClipStatus={(clipId, status) =>
-            handleUpdateClipStatus(currentProject.id, clipId, status)
-            }
-            onExport={() =>
-            showToast('Project exported successfully!', 'success')
-            } />);
-
-
+            projectName={currentProject?.name || 'Project Detail'}
+            video={currentVideo}
+            onOpenReviewer={openReviewer}
+            onUpdateClipStatus={handleClipApproval}
+          />
+        );
       case 'reviewer':
         return (
           <ClipReviewerScreen
             onNavigate={navigateTo}
-            project={currentProject}
-            onUpdateClipStatus={(clipId, status) =>
-            handleUpdateClipStatus(currentProject.id, clipId, status)
-            } />);
-
-
+            clips={currentVideo?.clips || []}
+            startIndex={reviewerClipIndex}
+            onUpdateClipStatus={handleClipApproval}
+          />
+        );
       default:
-        return (
-          <ProjectsScreen
-            projects={projects}
-            onNavigate={navigateTo}
-            onSelectProject={setCurrentProjectId} />);
-
-
+        return null;
     }
   };
+
   return (
     <div className="relative w-full h-screen overflow-hidden bg-black font-sans text-foreground antialiased">
-      {/* Main Content Area with Transitions */}
-      <div className="relative w-full h-full bg-[#F5F5F5] transition-all duration-300 ease-in-out">
-        {renderScreen()}
-      </div>
+      <div className="relative w-full h-full bg-[#F5F5F5] transition-all duration-300 ease-in-out">{renderScreen()}</div>
 
-      {/* Toast Notification */}
-      <Toast
-        message={toast.message}
-        type={toast.type}
-        visible={toast.visible}
-        onDismiss={hideToast} />
+      <Toast message={toast.message} type={toast.type} visible={toast.visible} onDismiss={hideToast} />
 
-
-      {/* Floating Navigator (Only visible if not splash/onboarding) */}
-      {currentScreen !== 'splash' && currentScreen !== 'onboarding' &&
-      <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 animate-fade-in-up">
+      {currentScreen !== 'splash' && currentScreen !== 'onboarding' && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 animate-fade-in-up">
           <div className="flex items-center gap-1 bg-black/80 backdrop-blur-xl border border-white/10 rounded-full px-2 py-1.5 shadow-2xl">
             {navItems.map(({ id, label, icon: Icon }) => {
-            const isActive = currentScreen === id;
-            return (
-              <button
-                key={id}
-                onClick={() => navigateTo(id)}
-                className={`flex items-center gap-2 px-3 py-2 rounded-full text-xs font-medium transition-all duration-300 ${isActive ? 'bg-[#00D4AA] text-black shadow-lg shadow-[#00D4AA]/30 transform scale-105' : 'text-white/60 hover:text-white hover:bg-white/10'}`}>
-
+              const isActive = currentScreen === id;
+              return (
+                <button
+                  key={id}
+                  onClick={() => navigateTo(id)}
+                  className={`flex items-center gap-2 px-3 py-2 rounded-full text-xs font-medium transition-all duration-300 ${
+                    isActive
+                      ? 'bg-[#00D4AA] text-black shadow-lg shadow-[#00D4AA]/30 transform scale-105'
+                      : 'text-white/60 hover:text-white hover:bg-white/10'
+                  }`}
+                >
                   <Icon className="w-4 h-4" />
-                  <span className={isActive ? 'block' : 'hidden sm:block'}>
-                    {label}
-                  </span>
-                </button>);
-
-          })}
+                  <span className={isActive ? 'block' : 'hidden sm:block'}>{label}</span>
+                </button>
+              );
+            })}
           </div>
         </div>
-      }
-    </div>);
-
+      )}
+    </div>
+  );
 }
