@@ -180,3 +180,51 @@ MVP is now fully functional with all major features connected to real backend AP
 - Complete local development environment setup with .env configuration
 
 ---
+
+## Feb 20 — Testable MVP Finalization
+
+### User Prompt
+"Work on this project and get it to a point that I can test it out with a 3 min video and have it use AI to smart cut clips to post to TikTok directly."
+
+### Actions Taken
+
+**Environment Verification & Fixes**
+- Claude Code: Verified all npm dependencies installed across all 3 packages (mobile, api-service, video-processor)
+- Claude Code: Verified .env files exist for api-service and mobile
+- Claude Code: Created backend/video-processor/.env with local dev configuration
+- Claude Code: Created missing UI components mobile/components/ui/Card.tsx and mobile/components/ui/Button.tsx (required by upload screen)
+- Claude Code: Started local PostgreSQL (brew services start postgresql@14), created clipora user and creator_mvp database
+- Claude Code: Applied full database schema (6 tables, 6 indexes, all constraints) from init.sql (skipped pgvector for local dev)
+
+**Code Fixes**
+- Claude Code: Fixed TypeScript error in mobile/app/(tabs)/index.tsx — removed reference to non-existent project.status property, replaced with computed status from video_count
+- Claude Code: Added start_time_seconds and end_time_seconds fields to Clip interface in mobile/store/index.ts
+- Claude Code: Updated backend/api-service/src/routes/projects.js GET /:id — now returns scripts alongside videos so chat screen can load existing conversations
+- Claude Code: Updated settings screen with API health check, server URL display, and cleaned up stub auth sections
+- Claude Code: Installed @types/jest and ajv dependencies to fix compilation issues
+
+**Verification**
+- Claude Code: Backend API starts on port 8080, health check passes
+- Claude Code: Tested project CRUD via curl — create, list, and get all working with local PostgreSQL
+- Claude Code: TypeScript compilation clean (npx tsc --noEmit passes with zero errors)
+- Claude Code: Expo Metro Bundler starts successfully
+
+### Files Created
+- mobile/components/ui/Card.tsx
+- mobile/components/ui/Button.tsx
+- backend/video-processor/.env
+
+### Files Modified
+- mobile/store/index.ts (added start_time_seconds, end_time_seconds to Clip)
+- mobile/app/(tabs)/index.tsx (fixed TypeScript error with project.status)
+- mobile/app/(tabs)/settings.tsx (updated with API health check)
+- backend/api-service/src/routes/projects.js (GET /:id now includes scripts)
+
+### Status
+MVP is now fully testable locally:
+1. Backend API: `cd backend/api-service && npm run dev` (port 8080)
+2. Mobile App: `cd mobile && npx expo start` (Expo Go or simulator)
+3. Database: Local PostgreSQL with creator_mvp database ready
+4. For full video processing pipeline: requires GCP credentials (Vertex AI, Speech-to-Text, Video Intelligence, Cloud Storage)
+
+---
