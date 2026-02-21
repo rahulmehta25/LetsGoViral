@@ -2,6 +2,7 @@
 
 require('dotenv').config();
 
+const express            = require('express');
 const { Storage }        = require('@google-cloud/storage');
 const { v4: uuidv4 }     = require('uuid');
 const fs                 = require('fs');
@@ -23,23 +24,13 @@ const CDN_BASE_URL     = process.env.CDN_BASE_URL;
 // Ensure tmp dir exists
 if (!fs.existsSync(TMP_DIR)) fs.mkdirSync(TMP_DIR, { recursive: true });
 
-/**
- * Main entry point.
- * Cloud Run Jobs receive the Pub/Sub message as the PUBSUB_MESSAGE env var
- * (base64-encoded JSON). Falls back to CLOUD_RUN_TASK_INDEX for direct invocation.
- */
-async function main() {
+// ─────────────────────────────────────────────────────────────────────────────
+// Video processing pipeline (extracted from former one-shot main())
+// ─────────────────────────────────────────────────────────────────────────────
+async function processVideo(bucketName, objectName) {
   let videoId;
 
   try {
-    // ── 1. Parse Pub/Sub Message ──────────────────────────────────────────
-    const rawMessage = process.env.PUBSUB_MESSAGE;
-    if (!rawMessage) throw new Error('PUBSUB_MESSAGE env var not set');
-
-    const message    = JSON.parse(Buffer.from(rawMessage, 'base64').toString('utf8'));
-    const bucketName = message.bucket;
-    const objectName = message.name;
-
     logger.info(`Processing upload: gs://${bucketName}/${objectName}`);
 
     // ── 2. Find Video Record in DB ────────────────────────────────────────
@@ -47,10 +38,19 @@ async function main() {
       'SELECT * FROM videos WHERE upload_path = $1',
       [objectName]
     );
-    if (!rows[0]) throw new Error(`No video record found for path: ${objectName}`);
+    if (!rows[0]) {
+      logger.info(`No video record found for path: ${objectName} — skipping (likely non-video object)`);
+      return;
+    }
 
     videoId = rows[0].id;
     const projectId = rows[0].project_id;
+
+    // Dedup: only process PENDING videos
+    if (rows[0].processing_status !== 'PENDING') {
+      logger.info(`Video ${videoId} is already ${rows[0].processing_status} — skipping`);
+      return;
+    }
 
     // ── 3. Mark as PROCESSING ─────────────────────────────────────────────
     await updateVideoStatus(videoId, 'PROCESSING');
@@ -209,11 +209,9 @@ async function main() {
 
     // Clean up local video file
     fs.unlink(localVideoPath, () => {});
-    process.exit(0);
   } catch (err) {
     logger.error({ message: `Processing failed: ${err.message}`, stack: err.stack });
     if (videoId) await updateVideoStatus(videoId, 'FAILED').catch(() => {});
-    process.exit(1);
   }
 }
 
@@ -225,4 +223,52 @@ async function updateVideoStatus(videoId, status) {
   logger.info(`Video ${videoId} → ${status}`);
 }
 
-main();
+// ─────────────────────────────────────────────────────────────────────────────
+// Express HTTP server — receives Pub/Sub push messages
+// ─────────────────────────────────────────────────────────────────────────────
+const app = express();
+app.use(express.json());
+
+// Pub/Sub push endpoint
+app.post('/', (req, res) => {
+  try {
+    const pubsubMessage = req.body?.message;
+    if (!pubsubMessage || !pubsubMessage.data) {
+      logger.warn('Received request with no Pub/Sub message data');
+      return res.status(200).send('No message data — ignored');
+    }
+
+    const decoded = JSON.parse(Buffer.from(pubsubMessage.data, 'base64').toString('utf8'));
+    const bucketName = decoded.bucket;
+    const objectName = decoded.name;
+
+    if (!bucketName || !objectName) {
+      logger.warn('Pub/Sub message missing bucket or name');
+      return res.status(200).send('Missing bucket/name — ignored');
+    }
+
+    logger.info(`Received Pub/Sub notification: gs://${bucketName}/${objectName}`);
+
+    // Acknowledge immediately so Pub/Sub doesn't retry
+    res.status(200).send('OK — processing started');
+
+    // Process asynchronously (after response is sent)
+    processVideo(bucketName, objectName).catch((err) => {
+      logger.error({ message: `Async processVideo failed: ${err.message}`, stack: err.stack });
+    });
+  } catch (err) {
+    logger.error({ message: `Error parsing Pub/Sub message: ${err.message}`, stack: err.stack });
+    // Return 200 to avoid infinite retries on malformed messages
+    res.status(200).send('Parse error — message dropped');
+  }
+});
+
+// Health check
+app.get('/health', (_req, res) => {
+  res.status(200).send('OK');
+});
+
+const PORT = process.env.PORT || 8080;
+app.listen(PORT, () => {
+  logger.info(`Video processor service listening on port ${PORT}`);
+});

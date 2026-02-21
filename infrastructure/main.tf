@@ -137,6 +137,14 @@ resource "google_pubsub_subscription" "video_processing_sub" {
   ack_deadline_seconds       = 600
   message_retention_duration = "3600s"
 
+  push_config {
+    push_endpoint = var.video_processor_service_url
+
+    oidc_token {
+      service_account_email = google_service_account.clipora_sa.email
+    }
+  }
+
   retry_policy {
     minimum_backoff = "30s"
     maximum_backoff = "300s"
