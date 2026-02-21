@@ -138,15 +138,18 @@ async function main() {
     // 9. Cut clips with FFmpeg
     await updateStatus(videoId, 'CLIPPING');
     const clipResults = [];
+    const usedSlugs = new Set();
 
     for (const clip of clips) {
       const clipId = uuidv4();
       logger.info(`Cutting clip ${clipId}: ${clip.start_time.toFixed(2)}s - ${clip.end_time.toFixed(2)}s (rank #${clip.strategic_rank}, score ${clip.hook_score})`);
 
       const localPath = await cutClip(localVideoPath, clip.start_time, clip.end_time, clipId);
-      const slug = clip.title
+      let slug = clip.title
         ? clip.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').substring(0, 60)
         : clipId;
+      if (usedSlugs.has(slug)) slug = `${slug}-${clipId.slice(0, 8)}`;
+      usedSlugs.add(slug);
       const destPath = `${projectId}/${videoId}/${slug}.mp4`;
 
       // Upload to processed bucket

@@ -6,6 +6,7 @@ const { Storage }        = require('@google-cloud/storage');
 const { v4: uuidv4 }     = require('uuid');
 const fs                 = require('fs');
 const path               = require('path');
+const { spawn }          = require('child_process');
 const db                 = require('./db');
 const { detectShotChanges }  = require('./services/videoIntelligence');
 const { transcribeVideo }    = require('./services/speechToText');
@@ -66,13 +67,35 @@ async function main() {
       Math.round(videoDurationSeconds), videoId,
     ]);
 
-    // ── 6. Transcribe + Shot Detection + Silence Detection (parallel) ─────
+    // ── 6. Extract audio to OGG_OPUS for faster Speech-to-Text upload ────
     await updateVideoStatus(videoId, 'TRANSCRIBING');
     const gcsUri = `gs://${bucketName}/${objectName}`;
+
+    const audioPath = path.join(TMP_DIR, `audio_${videoId}.ogg`);
+    logger.info('Extracting audio to OGG_OPUS...');
+    await new Promise((resolve, reject) => {
+      const proc = spawn('ffmpeg', [
+        '-y', '-i', localVideoPath,
+        '-vn', '-ac', '1', '-ar', '16000', '-c:a', 'libopus', '-b:a', '32k',
+        audioPath,
+      ]);
+      let stderr = '';
+      proc.stderr.on('data', (d) => (stderr += d));
+      proc.on('close', (code) => code === 0 ? resolve() : reject(new Error(`FFmpeg audio extraction exited ${code}: ${stderr.slice(-500)}`)));
+      proc.on('error', reject);
+    });
+
+    const audioGcsPath = `audio/${videoId}.ogg`;
+    await storage.bucket(bucketName).upload(audioPath, { destination: audioGcsPath });
+    const audioGcsUri = `gs://${bucketName}/${audioGcsPath}`;
+    logger.info(`Audio uploaded to ${audioGcsUri}`);
+    fs.unlink(audioPath, () => {});
+
+    // ── 7. Transcribe + Shot Detection + Silence Detection (parallel) ─────
     logger.info('Starting transcription, shot detection, and silence detection in parallel...');
 
     const [transcriptionResult, shotTimestamps, silences] = await Promise.all([
-      transcribeVideo(gcsUri),
+      transcribeVideo(audioGcsUri),
       detectShotChanges(gcsUri),
       detectSilences(localVideoPath),
     ]);
@@ -118,12 +141,15 @@ async function main() {
     await updateVideoStatus(videoId, 'CLIPPING');
 
     const clipResults = [];
+    const usedSlugs = new Set();
     for (const clip of clips) {
       const clipId     = uuidv4();
       const localPath  = await cutClip(localVideoPath, clip.start_time, clip.end_time, clipId);
-      const slug = clip.title
+      let slug = clip.title
         ? clip.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').substring(0, 60)
         : clipId;
+      if (usedSlugs.has(slug)) slug = `${slug}-${clipId.slice(0, 8)}`;
+      usedSlugs.add(slug);
       const destPath   = `${projectId}/${videoId}/${slug}.mp4`;
 
       // Upload to processed bucket

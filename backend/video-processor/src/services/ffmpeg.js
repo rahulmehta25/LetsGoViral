@@ -111,7 +111,11 @@ async function detectSilences(videoPath, noiseDb = -30, minDuration = 0.3) {
     proc.stderr.on('data', (d) => (stderr += d));
 
     proc.on('close', (code) => {
-      // silencedetect outputs to stderr even on success; exit code 0 expected
+      if (code !== 0) {
+        logger.warn(`FFmpeg silence detection exited with code ${code}`);
+        return resolve([]);
+      }
+
       const silences = [];
       const startRe = /silence_start:\s*([\d.]+)/g;
       const endRe   = /silence_end:\s*([\d.]+)/g;
