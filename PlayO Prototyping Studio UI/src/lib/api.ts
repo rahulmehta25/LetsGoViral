@@ -7,7 +7,8 @@ import {
   Clip,
 } from '../types';
 
-const API_BASE_URL = (import.meta.env.VITE_API_URL as string | undefined) || 'http://localhost:8080';
+// Empty string = use same origin (Vite proxy in dev). Omitted = local API on 8080.
+const API_BASE_URL = import.meta.env.VITE_API_URL !== undefined ? (import.meta.env.VITE_API_URL as string) : 'http://localhost:8080';
 const API_KEY = (import.meta.env.VITE_API_KEY as string | undefined) || 'dev-api-key';
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
