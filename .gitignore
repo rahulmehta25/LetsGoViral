@@ -18,6 +18,9 @@ gcp-key.json
 *.tfstate.*
 .terraform.lock.hcl
 
+# Binary assets (use external storage instead)
+resized/
+
 # Build / IDE
 dist/
 .expo/
