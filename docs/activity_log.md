@@ -662,3 +662,20 @@ To add quiet background music, POST /api/clips/:clip_id/sfx with `{ "prompt": ".
 - Backward compatible: existing SFX without explicit volume setting default to 1.0
 
 ---
+
+## 2026-02-22 — Fix "Clip has no cdn_url" Error in SFX Routes
+
+### User Prompt
+"Clip has no cdn_url to re-mix SFX onto"
+
+### Root Cause
+The video processor saves clip metadata with cdn_url=NULL at creation time. The cdn_url only gets populated when the user calls POST /videos/:id/finalize-clips (the export step). All SFX routes (DELETE, PUT, PATCH, POST) were returning 422 errors for clips that hadn't been exported yet.
+
+### Fixes Applied
+1. Backfilled cdn_url for all 8 clips missing it in production DB by constructing URL from processed_path (all 63 clips now have cdn_url)
+2. Changed all 4 SFX routes (DELETE /sfx/:id, PUT /sfx/:id, PATCH /sfx/:id, POST /sfx) to gracefully skip video mixing when cdn_url is missing instead of returning 422. SFX data is still saved to DB — video mix happens when cdn_url becomes available.
+
+### Files Modified
+- backend/api-service/src/routes/clips.js — removed 422 errors, made video mixing conditional on cdn_url presence
+
+---

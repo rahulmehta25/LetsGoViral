@@ -181,10 +181,7 @@ router.delete('/:id/sfx/:sfx_id', async (req, res) => {
 
   let sfxVideoUrl = null;
 
-  if (remaining.length > 0) {
-    if (!clip.cdn_url) {
-      return res.status(422).json({ error: 'Clip has no cdn_url to re-mix SFX onto' });
-    }
+  if (remaining.length > 0 && clip.cdn_url) {
     const videoBuffer = await mixSfxOntoVideo(clip.cdn_url, remaining);
     sfxVideoUrl = await uploadMixedVideoToGCS(videoBuffer, clip.id);
   }
@@ -233,11 +230,11 @@ router.put('/:id/sfx/:sfx_id', async (req, res) => {
     updatedSfx[itemIndex] = { ...updatedSfx[itemIndex], volume: v };
   }
 
-  if (!clip.cdn_url) {
-    return res.status(422).json({ error: 'Clip has no cdn_url to re-mix SFX onto' });
+  let sfxVideoUrl = clip.sfx_video_url || null;
+  if (clip.cdn_url) {
+    const videoBuffer = await mixSfxOntoVideo(clip.cdn_url, updatedSfx);
+    sfxVideoUrl = await uploadMixedVideoToGCS(videoBuffer, clip.id);
   }
-  const videoBuffer = await mixSfxOntoVideo(clip.cdn_url, updatedSfx);
-  const sfxVideoUrl = await uploadMixedVideoToGCS(videoBuffer, clip.id);
 
   const { rows: updated } = await db.query(
     `UPDATE clips SET sfx_data = $1, sfx_video_url = $2 WHERE id = $3 RETURNING *`,
@@ -267,11 +264,11 @@ router.patch('/:id/sfx/:sfx_id', async (req, res) => {
     i === itemIndex ? { ...s, timestamp_seconds: t } : s
   );
 
-  if (!clip.cdn_url) {
-    return res.status(422).json({ error: 'Clip has no cdn_url to re-mix SFX onto' });
+  let sfxVideoUrl = clip.sfx_video_url || null;
+  if (clip.cdn_url) {
+    const videoBuffer = await mixSfxOntoVideo(clip.cdn_url, updatedSfx);
+    sfxVideoUrl = await uploadMixedVideoToGCS(videoBuffer, clip.id);
   }
-  const videoBuffer = await mixSfxOntoVideo(clip.cdn_url, updatedSfx);
-  const sfxVideoUrl = await uploadMixedVideoToGCS(videoBuffer, clip.id);
 
   const { rows: updated } = await db.query(
     `UPDATE clips SET sfx_data = $1, sfx_video_url = $2 WHERE id = $3 RETURNING *`,
@@ -315,11 +312,11 @@ router.post('/:id/sfx', async (req, res) => {
   };
   const updatedSfx = [...currentSfx, newItem];
 
-  if (!clip.cdn_url) {
-    return res.status(422).json({ error: 'Clip has no cdn_url to re-mix SFX onto' });
+  let sfxVideoUrl = null;
+  if (clip.cdn_url) {
+    const videoBuffer = await mixSfxOntoVideo(clip.cdn_url, updatedSfx);
+    sfxVideoUrl = await uploadMixedVideoToGCS(videoBuffer, clip.id);
   }
-  const videoBuffer = await mixSfxOntoVideo(clip.cdn_url, updatedSfx);
-  const sfxVideoUrl = await uploadMixedVideoToGCS(videoBuffer, clip.id);
 
   const { rows: updated } = await db.query(
     `UPDATE clips SET sfx_data = $1, sfx_video_url = $2 WHERE id = $3 RETURNING *`,
