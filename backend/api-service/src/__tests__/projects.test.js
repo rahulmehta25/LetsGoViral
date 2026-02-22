@@ -138,7 +138,14 @@ describe('Projects API', () => {
 
   describe('DELETE /api/projects/:id', () => {
     test('deletes existing project', async () => {
-      db.query.mockResolvedValue({ rowCount: 1 });
+      // DELETE route makes 3 sequential db.query calls:
+      // 1. SELECT videos for the project
+      // 2. SELECT clips for the project
+      // 3. DELETE the project
+      db.query
+        .mockResolvedValueOnce({ rows: [] })       // videos query
+        .mockResolvedValueOnce({ rows: [] })       // clips query
+        .mockResolvedValueOnce({ rowCount: 1 });   // delete query
 
       const res = await request(app).delete('/api/projects/1');
 
@@ -146,7 +153,10 @@ describe('Projects API', () => {
     });
 
     test('returns 404 for nonexistent project', async () => {
-      db.query.mockResolvedValue({ rowCount: 0 });
+      db.query
+        .mockResolvedValueOnce({ rows: [] })       // videos query
+        .mockResolvedValueOnce({ rows: [] })       // clips query
+        .mockResolvedValueOnce({ rowCount: 0 });   // delete query
 
       const res = await request(app).delete('/api/projects/nonexistent');
 

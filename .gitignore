@@ -1,6 +1,8 @@
 # Dependencies
 node_modules/
 package-lock.json
+!backend/api-service/package-lock.json
+!backend/video-processor/package-lock.json
 
 # Environment and secrets
 .env
@@ -20,6 +22,7 @@ gcp-key.json
 
 # Binary assets (use external storage instead)
 resized/
+cloud-sql-proxy
 
 # Build / IDE
 dist/

@@ -115,9 +115,9 @@ export function ProjectDetailScreen({
                 >
                   <div className="flex h-28">
                     <div className="w-28 bg-gray-900 relative flex-shrink-0 group overflow-hidden">
-                      {clip.cdn_url ? (
+                      {(clip.sfx_video_url ?? clip.cdn_url) ? (
                         <video
-                          src={clip.cdn_url}
+                          src={clip.sfx_video_url ?? clip.cdn_url ?? ''}
                           className="absolute inset-0 w-full h-full object-cover"
                           muted
                           playsInline
@@ -173,16 +173,30 @@ export function ProjectDetailScreen({
 
         {activeTab === 'Suggestions' && (
           <div className="space-y-4">
+            {video?.edit_guidance?.overall_feedback && (
+              <Card className="p-4 bg-[#00D4AA]/5 border border-[#00D4AA]/20">
+                <h4 className="font-bold text-gray-900 mb-1 text-sm uppercase tracking-wide">Overall Feedback</h4>
+                <p className="text-sm text-gray-700 leading-relaxed">{video.edit_guidance.overall_feedback}</p>
+              </Card>
+            )}
+
             {(video?.edit_guidance?.suggestions || []).map((suggestion, index) => (
               <Card key={`${suggestion.type}-${index}`} className="p-4 border-l-4 border-l-[#00D4AA]">
-                <h4 className="font-bold text-gray-900 mb-1">{suggestion.type.replace(/_/g, ' ')}</h4>
+                <div className="flex items-center justify-between mb-1">
+                  <h4 className="font-bold text-gray-900 capitalize">{suggestion.type.replace(/_/g, ' ')}</h4>
+                  {suggestion.timestamp_seconds != null && (
+                    <span className="text-xs font-mono bg-gray-100 text-gray-500 px-2 py-0.5 rounded">
+                      {new Date(suggestion.timestamp_seconds * 1000).toISOString().substr(14, 5)}
+                    </span>
+                  )}
+                </div>
                 <p className="text-sm text-gray-600">{suggestion.suggestion}</p>
               </Card>
             ))}
 
             {!video?.edit_guidance?.suggestions?.length && (
               <Card className="p-4">
-                <p className="text-sm text-gray-600">No edit suggestions available yet.</p>
+                <p className="text-sm text-gray-500">No edit suggestions available yet.</p>
               </Card>
             )}
           </div>

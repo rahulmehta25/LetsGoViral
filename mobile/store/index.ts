@@ -4,6 +4,7 @@ export interface Clip {
   id: string;
   video_id: string;
   cdn_url: string;
+  sfx_video_url?: string | null;
   start_time_seconds: number;
   end_time_seconds: number;
   duration_seconds: number;

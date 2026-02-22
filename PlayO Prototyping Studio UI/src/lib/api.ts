@@ -5,6 +5,7 @@ import {
   Script,
   VideoDetails,
   Clip,
+  SoundSuggestion,
 } from '../types';
 
 // Empty string = use same origin (Vite proxy in dev). Omitted = local API on 8080.
@@ -83,6 +84,42 @@ export const webApi = {
       request<Clip>(`/clips/${clipId}`, {
         method: 'PUT',
         body: JSON.stringify({ user_approved: userApproved }),
+      }),
+    autoGenerateSound: (clipId: string) =>
+      request<{ clip: Clip; suggestions: { tone: string; vibe: string; sfx: SoundSuggestion[]; music: SoundSuggestion[] } }>(
+        `/clips/${clipId}/auto-sound`,
+        { method: 'POST' }
+      ),
+    getSoundSuggestions: (clipId: string) =>
+      request<{ tone: string; vibe: string; sfx: SoundSuggestion[]; music: SoundSuggestion[] }>(
+        `/clips/${clipId}/sound-suggestions`
+      ),
+    generateSound: (
+      clipId: string,
+      payload: { prompt: string; type: 'sfx' | 'music'; duration_seconds?: number }
+    ) =>
+      request<Clip>(`/clips/${clipId}/sound`, {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      }),
+    generateSfx: (clipId: string) =>
+      request<{ clip: Clip }>(`/clips/${clipId}/generate-sfx`, { method: 'POST' }),
+    deleteSfxItem: (clipId: string, sfxId: string) =>
+      request<{ clip: Clip }>(`/clips/${clipId}/sfx/${sfxId}`, { method: 'DELETE' }),
+    updateSfxItem: (clipId: string, sfxId: string, payload: { prompt?: string; volume?: number }) =>
+      request<{ clip: Clip }>(`/clips/${clipId}/sfx/${sfxId}`, {
+        method: 'PUT',
+        body: JSON.stringify(payload),
+      }),
+    updateSfxTimestamp: (clipId: string, sfxId: string, timestamp_seconds: number) =>
+      request<{ clip: Clip }>(`/clips/${clipId}/sfx/${sfxId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ timestamp_seconds }),
+      }),
+    addSfx: (clipId: string, payload: { prompt: string; timestamp_seconds: number; label?: string; volume?: number }) =>
+      request<{ clip: Clip }>(`/clips/${clipId}/sfx`, {
+        method: 'POST',
+        body: JSON.stringify(payload),
       }),
   },
   scripts: {

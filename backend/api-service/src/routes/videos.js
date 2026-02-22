@@ -67,7 +67,9 @@ router.get('/:id', async (req, res) => {
                   'rationale',      c.rationale,
                   'title',          c.title,
                   'hook',           c.hook,
-                  'user_approved',  c.user_approved
+                  'user_approved',  c.user_approved,
+                  'sfx_data',       c.sfx_data,
+                  'sfx_video_url',  c.sfx_video_url
                 )
                 ORDER BY c.strategic_rank ASC
               ) FILTER (WHERE c.id IS NOT NULL),
