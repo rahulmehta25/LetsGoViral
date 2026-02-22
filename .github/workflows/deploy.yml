@@ -11,6 +11,7 @@ env:
   AR_REPO:         ${{ secrets.GCP_PROJECT_ID }}/clipora
   API_IMAGE:       us-east1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/clipora/api-service
   JOB_IMAGE:       us-east1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/clipora/video-processor
+  WEB_IMAGE:       us-east1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/clipora/web
 
 jobs:
   # ─────────────────────────────────────────
@@ -141,6 +142,60 @@ jobs:
           secrets: |
             DB_PASSWORD=clipora-db-password:latest
           env_vars_update_strategy: overwrite
+
+  # ─────────────────────────────────────────
+  # Build & Deploy Frontend (Web)
+  # ─────────────────────────────────────────
+  deploy-frontend:
+    name: Deploy Frontend
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WIF_PROVIDER }}
+          service_account:           ${{ secrets.GCP_SERVICE_ACCOUNT_EMAIL }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker
+        run: gcloud auth configure-docker us-east1-docker.pkg.dev --quiet
+
+      - name: Build & Push Frontend Image
+        working-directory: PlayO Prototyping Studio UI
+        run: |
+          docker build \
+            --build-arg VITE_API_URL=https://clipora-api-594534640965.us-east1.run.app \
+            --build-arg VITE_API_KEY=${{ secrets.VITE_API_KEY }} \
+            --build-arg VITE_GEMINI_API_KEY=${{ secrets.VITE_GEMINI_API_KEY }} \
+            -t ${{ env.WEB_IMAGE }}:${{ github.sha }} \
+            -t ${{ env.WEB_IMAGE }}:latest \
+            .
+          docker push ${{ env.WEB_IMAGE }}:${{ github.sha }}
+          docker push ${{ env.WEB_IMAGE }}:latest
+
+      - name: Deploy Frontend to Cloud Run
+        uses: google-github-actions/deploy-cloudrun@v2
+        with:
+          service:  clipora-web
+          region:   ${{ env.GCP_REGION }}
+          image:    ${{ env.WEB_IMAGE }}:${{ github.sha }}
+          flags: |
+            --port=8080
+            --memory=256Mi
+            --cpu=1
+            --min-instances=0
+            --max-instances=3
+            --allow-unauthenticated
+            --service-account=${{ secrets.GCP_SERVICE_ACCOUNT_EMAIL }}
 
   # ─────────────────────────────────────────
   # Run Tests (parallel with builds)

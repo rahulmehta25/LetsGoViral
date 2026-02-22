@@ -481,3 +481,26 @@ https://clipora-video-processor-594534640965.us-east1.run.app
 End-to-end pipeline is now live: GCS upload → Pub/Sub → Cloud Run Service → automatic video processing
 
 ---
+
+## Feb 21 — Eliminate Local Docker Builds: Source Deploys + Working CI
+
+### User Prompt
+"Implement the plan to eliminate local Docker builds, add CI frontend deployment, and create a universal deploy script."
+
+### Actions Taken
+1. Added `deploy-frontend` job to `.github/workflows/deploy.yml` — builds frontend Docker image with `--build-arg VITE_API_URL`, `VITE_API_KEY`, `VITE_GEMINI_API_KEY`, pushes to Artifact Registry, deploys to `clipora-web` Cloud Run service
+2. Updated `PlayO Prototyping Studio UI/Dockerfile` to accept `VITE_GEMINI_API_KEY` build arg
+3. Created `scripts/deploy.sh` — universal deploy script supporting `api`, `processor`, `web`, `all` targets. Backend services use `gcloud run deploy --source .` (no Docker needed). Frontend builds with Docker and reads secrets from env vars or Secret Manager.
+4. Created `backend/video-processor/.gcloudignore` to exclude node_modules, .env, etc. from source deploys
+5. Set missing GitHub secrets: `DB_HOST` (35.237.97.28), `VITE_API_KEY` (dev-test-key-clipora-2024), `VITE_GEMINI_API_KEY` (from backend .env)
+6. All 9 GitHub secrets now configured: GCP_PROJECT_ID, GCP_SERVICE_ACCOUNT_EMAIL, GCP_WIF_PROVIDER, GCS_UPLOADS_BUCKET, GCS_PROCESSED_BUCKET, CDN_BASE_URL, DB_HOST, VITE_API_KEY, VITE_GEMINI_API_KEY
+
+### Files Modified
+- `.github/workflows/deploy.yml` — added WEB_IMAGE env var and deploy-frontend job
+- `PlayO Prototyping Studio UI/Dockerfile` — added VITE_GEMINI_API_KEY ARG/ENV
+
+### Files Created
+- `scripts/deploy.sh` — universal deploy script (executable)
+- `backend/video-processor/.gcloudignore`
+
+---
