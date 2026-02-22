@@ -4,28 +4,25 @@ require('dotenv').config();
 
 const express            = require('express');
 const { Storage }        = require('@google-cloud/storage');
-const { v4: uuidv4 }     = require('uuid');
+const { v4: uuidv4 }    = require('uuid');
 const fs                 = require('fs');
 const path               = require('path');
-const { spawn }          = require('child_process');
 const db                 = require('./db');
 const { detectShotChanges }  = require('./services/videoIntelligence');
 const { transcribeVideo }    = require('./services/speechToText');
 const { analyzeClips }       = require('./services/geminiAnalyzer');
-const { cutClip, getVideoDuration, detectSilences, snapToSilence, extractAudioOggOpus } = require('./services/ffmpeg');
+const { getVideoDuration, detectSilences, snapToSilence, extractAudioOggOpus } = require('./services/ffmpeg');
 const { logger }         = require('./utils/logger');
 
-const storage     = new Storage();
-const TMP_DIR     = process.env.TMP_DIR || '/tmp/clipora';
-const UPLOADS_BUCKET   = process.env.GCS_UPLOADS_BUCKET;
-const PROCESSED_BUCKET = process.env.GCS_PROCESSED_BUCKET;
-const CDN_BASE_URL     = process.env.CDN_BASE_URL;
+const storage  = new Storage();
+const TMP_DIR  = process.env.TMP_DIR || '/tmp/clipora';
 
 // Ensure tmp dir exists
 if (!fs.existsSync(TMP_DIR)) fs.mkdirSync(TMP_DIR, { recursive: true });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Video processing pipeline (extracted from former one-shot main())
+// Video processing pipeline
+// Saves clip candidates with timestamps — user reviews in UI, then ffmpeg cuts.
 // ─────────────────────────────────────────────────────────────────────────────
 const API_TIMEOUT_MS = parseInt(process.env.API_TIMEOUT_MS || '600000', 10);
 
@@ -46,7 +43,7 @@ async function processVideo(bucketName, objectName) {
   try {
     logger.info(`Processing upload: gs://${bucketName}/${objectName}`);
 
-    // ── 2. Find Video Record in DB ────────────────────────────────────────
+    // ── 1. Find Video Record in DB ──────────────────────────────────────
     const { rows } = await db.query(
       'SELECT * FROM videos WHERE upload_path = $1',
       [objectName]
@@ -65,23 +62,23 @@ async function processVideo(bucketName, objectName) {
       return;
     }
 
-    // ── 3. Mark as PROCESSING ─────────────────────────────────────────────
+    // ── 2. Mark as PROCESSING ───────────────────────────────────────────
     await updateVideoStatus(videoId, 'PROCESSING');
 
-    // ── 4. Download Video to Temp Storage ─────────────────────────────────
+    // ── 3. Download Video to Temp Storage ───────────────────────────────
     const localVideoPath = path.join(TMP_DIR, `input_${videoId}.mp4`);
     tmpFiles.push(localVideoPath);
     logger.info(`Downloading video to ${localVideoPath}`);
     await storage.bucket(bucketName).file(objectName).download({ destination: localVideoPath });
 
-    // ── 5. Get Duration ───────────────────────────────────────────────────
+    // ── 4. Get Duration ─────────────────────────────────────────────────
     const videoDurationSeconds = await getVideoDuration(localVideoPath);
     logger.info(`Video duration: ${videoDurationSeconds}s`);
     await db.query('UPDATE videos SET duration_seconds = $1 WHERE id = $2', [
       Math.round(videoDurationSeconds), videoId,
     ]);
 
-    // ── 6. Extract audio to OGG_OPUS for faster Speech-to-Text upload ────
+    // ── 5. Extract audio to OGG_OPUS for faster Speech-to-Text ─────────
     await updateVideoStatus(videoId, 'TRANSCRIBING');
     const gcsUri = `gs://${bucketName}/${objectName}`;
 
@@ -95,7 +92,7 @@ async function processVideo(bucketName, objectName) {
     const audioGcsUri = `gs://${bucketName}/${audioGcsPath}`;
     logger.info(`Audio uploaded to ${audioGcsUri}`);
 
-    // ── 7. Transcribe + Shot Detection + Silence Detection (parallel) ─────
+    // ── 6. Transcribe + Shot Detection + Silence Detection (parallel) ───
     logger.info('Starting transcription, shot detection, and silence detection in parallel...');
 
     const [transcriptionResult, shotTimestamps, silences] = await Promise.all([
@@ -113,7 +110,7 @@ async function processVideo(bucketName, objectName) {
       JSON.stringify(shotTimestamps), videoId,
     ]);
 
-    // ── 8. AI Clip Analysis ───────────────────────────────────────────────
+    // ── 7. AI Clip Analysis ─────────────────────────────────────────────
     await updateVideoStatus(videoId, 'ANALYZING');
 
     // Fetch script content if linked to this project
@@ -141,32 +138,18 @@ async function processVideo(bucketName, objectName) {
       };
     });
 
-    // ── 9. Cut Clips with FFmpeg ──────────────────────────────────────────
-    await updateVideoStatus(videoId, 'CLIPPING');
-
+    // ── 8. Save Clip Candidates (no ffmpeg cut yet) ─────────────────────
     const clipResults = [];
     const usedSlugs = new Set();
     for (const clip of clips) {
-      const clipId     = uuidv4();
-      const localPath  = await cutClip(localVideoPath, clip.start_time, clip.end_time, clipId);
+      const clipId = uuidv4();
       let slug = clip.title
         ? clip.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').substring(0, 60)
         : clipId;
       if (usedSlugs.has(slug)) slug = `${slug}-${clipId.slice(0, 8)}`;
       usedSlugs.add(slug);
-      const destPath   = `${projectId}/${videoId}/${slug}.mp4`;
+      const destPath = `${projectId}/${videoId}/${slug}.mp4`;
 
-      // Upload to processed bucket
-      await storage.bucket(PROCESSED_BUCKET).upload(localPath, {
-        destination: destPath,
-        metadata: { cacheControl: 'public, max-age=86400' },
-      });
-
-      const cdnUrl = CDN_BASE_URL
-        ? `${CDN_BASE_URL}/${destPath}`
-        : `https://storage.googleapis.com/${PROCESSED_BUCKET}/${destPath}`;
-
-      // Insert clip record
       await db.query(
         `INSERT INTO clips
            (id, video_id, processed_path, cdn_url,
@@ -174,7 +157,7 @@ async function processVideo(bucketName, objectName) {
             strategic_rank, hook_score, rationale, title, hook)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
         [
-          clipId, videoId, destPath, cdnUrl,
+          clipId, videoId, destPath, null,
           clip.start_time, clip.end_time,
           parseFloat((clip.end_time - clip.start_time).toFixed(3)),
           clip.strategic_rank, clip.hook_score, clip.rationale,
@@ -182,14 +165,11 @@ async function processVideo(bucketName, objectName) {
         ]
       );
 
-      clipResults.push({ clipId, cdnUrl });
-      logger.info(`Clip ${clipId} uploaded: ${cdnUrl}`);
-
-      // Clean up local clip file
-      fs.unlink(localPath, () => {});
+      clipResults.push({ clipId, start: clip.start_time, end: clip.end_time });
+      logger.info(`Clip candidate ${clipId} saved: ${clip.start_time}s -> ${clip.end_time}s`);
     }
 
-    // ── 10. Generate Long-Form Edit Guidance ─────────────────────────────
+    // ── 9. Generate Long-Form Edit Guidance ─────────────────────────────
     if (script && transcription) {
       try {
         const { generateEditGuidance } = require('./services/editGuidance');
@@ -207,9 +187,9 @@ async function processVideo(bucketName, objectName) {
       }
     }
 
-    // ── 11. Mark as COMPLETED ─────────────────────────────────────────────
+    // ── 10. Mark as COMPLETED ───────────────────────────────────────────
     await updateVideoStatus(videoId, 'COMPLETED');
-    logger.info(`Video ${videoId} processing complete. ${clipResults.length} clips generated.`);
+    logger.info(`Video ${videoId} processing complete. ${clipResults.length} clip candidates generated.`);
 
     // Clean up orphaned audio file from GCS
     try {
@@ -218,9 +198,12 @@ async function processVideo(bucketName, objectName) {
     } catch (e) {
       logger.warn(`Failed to delete GCS audio ${audioGcsPath}: ${e.message}`);
     }
+
+    return clipResults;
   } catch (err) {
     logger.error({ message: `Processing failed: ${err.message}`, stack: err.stack });
     if (videoId) await updateVideoStatus(videoId, 'FAILED').catch(() => {});
+    throw err;
   } finally {
     for (const f of tmpFiles) {
       fs.unlink(f, () => {});
@@ -236,52 +219,63 @@ async function updateVideoStatus(videoId, status) {
   logger.info(`Video ${videoId} → ${status}`);
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Express HTTP server — receives Pub/Sub push messages
-// ─────────────────────────────────────────────────────────────────────────────
-const app = express();
-app.use(express.json());
+// ─── Dual-mode entry point ─────────────────────────────────────────────────
+// Mode 1: Cloud Run Job — PUBSUB_MESSAGE env var contains base64-encoded JSON
+// Mode 2: Cloud Run Service — Pub/Sub pushes HTTP POST with message in body
 
-// Pub/Sub push endpoint
-app.post('/', (req, res) => {
-  try {
-    const pubsubMessage = req.body?.message;
-    if (!pubsubMessage || !pubsubMessage.data) {
-      logger.warn('Received request with no Pub/Sub message data');
-      return res.status(200).send('No message data — ignored');
+if (process.env.PUBSUB_MESSAGE) {
+  // Job mode
+  (async () => {
+    try {
+      const message = JSON.parse(Buffer.from(process.env.PUBSUB_MESSAGE, 'base64').toString('utf8'));
+      await processVideo(message.bucket, message.name);
+      process.exit(0);
+    } catch (err) {
+      logger.error({ message: `Job failed: ${err.message}`, stack: err.stack });
+      process.exit(1);
     }
+  })();
+} else {
+  // Service mode — start HTTP server for Pub/Sub push
+  const app = express();
+  app.use(express.json());
 
-    const decoded = JSON.parse(Buffer.from(pubsubMessage.data, 'base64').toString('utf8'));
-    const bucketName = decoded.bucket;
-    const objectName = decoded.name;
+  app.get('/health', (_req, res) => res.status(200).json({ status: 'ok', service: 'clipora-video-processor' }));
 
-    if (!bucketName || !objectName) {
-      logger.warn('Pub/Sub message missing bucket or name');
-      return res.status(200).send('Missing bucket/name — ignored');
+  app.post('/', (req, res) => {
+    try {
+      const pubsubMessage = req.body?.message;
+      if (!pubsubMessage || !pubsubMessage.data) {
+        logger.warn('Received request with no Pub/Sub message data');
+        return res.status(200).send('No message data — ignored');
+      }
+
+      const decoded = JSON.parse(Buffer.from(pubsubMessage.data, 'base64').toString('utf8'));
+      const { bucket, name } = decoded;
+
+      if (!bucket || !name) {
+        logger.warn('Pub/Sub message missing bucket or name');
+        return res.status(200).send('Missing bucket/name — ignored');
+      }
+
+      logger.info(`Pub/Sub push received: gs://${bucket}/${name}`);
+
+      // Acknowledge immediately so Pub/Sub doesn't retry
+      res.status(200).send('OK — processing started');
+
+      // Process asynchronously (Cloud Run keeps the instance alive while there's work)
+      processVideo(bucket, name).catch((err) => {
+        logger.error({ message: `Async processing failed: ${err.message}`, stack: err.stack });
+      });
+    } catch (err) {
+      logger.error({ message: `Error parsing Pub/Sub message: ${err.message}`, stack: err.stack });
+      // Return 200 to avoid infinite retries on malformed messages
+      res.status(200).send('Parse error — message dropped');
     }
+  });
 
-    logger.info(`Received Pub/Sub notification: gs://${bucketName}/${objectName}`);
-
-    // Acknowledge immediately so Pub/Sub doesn't retry
-    res.status(200).send('OK — processing started');
-
-    // Process asynchronously (after response is sent)
-    processVideo(bucketName, objectName).catch((err) => {
-      logger.error({ message: `Async processVideo failed: ${err.message}`, stack: err.stack });
-    });
-  } catch (err) {
-    logger.error({ message: `Error parsing Pub/Sub message: ${err.message}`, stack: err.stack });
-    // Return 200 to avoid infinite retries on malformed messages
-    res.status(200).send('Parse error — message dropped');
-  }
-});
-
-// Health check
-app.get('/health', (_req, res) => {
-  res.status(200).send('OK');
-});
-
-const PORT = process.env.PORT || 8080;
-app.listen(PORT, () => {
-  logger.info(`Video processor service listening on port ${PORT}`);
-});
+  const PORT = process.env.PORT || 8080;
+  app.listen(PORT, () => {
+    logger.info(`Video processor service listening on port ${PORT}`);
+  });
+}

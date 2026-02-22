@@ -43,6 +43,8 @@ export interface EditGuidance {
 export interface Clip {
   id: string;
   video_id: string;
+  start_time_seconds: number | null;
+  end_time_seconds: number | null;
   duration_seconds: number | null;
   strategic_rank: number | null;
   hook_score: number | null;
@@ -57,6 +59,7 @@ export interface VideoDetails {
   id: string;
   project_id: string;
   processing_status: string;
+  source_video_url?: string | null;
   clips: Clip[];
   edit_guidance?: EditGuidance;
 }

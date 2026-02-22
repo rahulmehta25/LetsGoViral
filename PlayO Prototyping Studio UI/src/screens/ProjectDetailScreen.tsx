@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ArrowLeft, Check, X, Play, Download } from 'lucide-react';
+import { ArrowLeft, Play, Download, Film } from 'lucide-react';
 import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { Tabs } from '../components/ui/Tabs';
@@ -11,7 +11,6 @@ interface ProjectDetailScreenProps {
   projectName: string;
   video: VideoDetails | null;
   onOpenReviewer: (clip: Clip) => void;
-  onUpdateClipStatus: (clipId: string, approved: boolean) => Promise<void>;
 }
 
 export function ProjectDetailScreen({
@@ -19,10 +18,10 @@ export function ProjectDetailScreen({
   projectName,
   video,
   onOpenReviewer,
-  onUpdateClipStatus,
 }: ProjectDetailScreenProps) {
   const [activeTab, setActiveTab] = useState('Clips');
   const clips = video?.clips || [];
+  const hasFinalizedClips = clips.length > 0 && clips.every((clip) => Boolean(clip.cdn_url) && clip.user_approved === true);
 
   return (
     <div className="fixed inset-0 bg-[#F5F5F5] flex flex-col animate-slide-up">
@@ -46,11 +45,30 @@ export function ProjectDetailScreen({
         {activeTab === 'Clips' && (
           <>
             <div className="flex justify-between items-center px-2">
-              <span className="text-sm font-bold text-gray-500 uppercase tracking-wide">Generated Clips</span>
+              <span className="text-sm font-bold text-gray-500 uppercase tracking-wide">
+                {hasFinalizedClips ? 'Generated Clips' : 'Pending Clip Splits'}
+              </span>
               <Badge variant="default">{clips.length}</Badge>
             </div>
 
-            {clips.map((clip) => {
+            {!hasFinalizedClips && clips.length > 0 && (
+              <Card className="p-6 space-y-3 border-2 border-[#00D4AA]/30">
+                <div className="flex items-center gap-3">
+                  <div className="h-10 w-10 rounded-full bg-[#00D4AA]/10 text-[#00D4AA] flex items-center justify-center">
+                    <Film size={18} />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-gray-900">Review timeline before clipping</h3>
+                    <p className="text-sm text-gray-600">Segments are detected, but clips are not cut yet.</p>
+                  </div>
+                </div>
+                <Button className="bg-[#00D4AA] hover:bg-[#00B390] text-white" onClick={() => onNavigate('reviewer')}>
+                  Open Full Video Review
+                </Button>
+              </Card>
+            )}
+
+            {hasFinalizedClips && clips.map((clip) => {
               const status =
                 clip.user_approved === true ? 'approved' : clip.user_approved === false ? 'rejected' : 'pending';
 
@@ -101,42 +119,13 @@ export function ProjectDetailScreen({
                         </div>
                         <p className="text-xs text-gray-500 line-clamp-2 leading-relaxed">{clip.rationale || 'No rationale provided.'}</p>
                       </div>
-
-                      <div className="flex justify-end gap-2 mt-2">
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            void onUpdateClipStatus(clip.id, false);
-                          }}
-                          className={`w-8 h-8 rounded-full flex items-center justify-center transition-all ${
-                            status === 'rejected'
-                              ? 'bg-red-100 text-red-500'
-                              : 'bg-gray-100 text-gray-400 hover:bg-red-100 hover:text-red-500'
-                          }`}
-                        >
-                          <X size={16} />
-                        </button>
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            void onUpdateClipStatus(clip.id, true);
-                          }}
-                          className={`w-8 h-8 rounded-full flex items-center justify-center transition-all ${
-                            status === 'approved'
-                              ? 'bg-[#00D4AA] text-white shadow-md'
-                              : 'bg-[#00D4AA]/10 text-[#00D4AA] hover:bg-[#00D4AA] hover:text-white'
-                          }`}
-                        >
-                          <Check size={16} />
-                        </button>
-                      </div>
                     </div>
                   </div>
                 </Card>
               );
             })}
 
-            {clips.length === 0 && <Card className="p-6 text-sm text-gray-500">No clips yet. Wait for processing to complete.</Card>}
+            {clips.length === 0 && <Card className="p-6 text-sm text-gray-500">No clip candidates yet. Wait for processing to complete.</Card>}
           </>
         )}
 

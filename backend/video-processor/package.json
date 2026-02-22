@@ -13,10 +13,10 @@
     "@google-cloud/pubsub": "^4.4.0",
     "@google-cloud/speech": "^6.5.0",
     "@google-cloud/storage": "^7.7.0",
-    "@google-cloud/video-intelligence": "^5.0.4",
     "@google-cloud/vertexai": "^1.1.0",
+    "@google-cloud/video-intelligence": "^5.0.4",
     "dotenv": "^16.4.5",
-    "express": "^4.21.0",
+    "express": "^5.2.1",
     "pg": "^8.11.5",
     "uuid": "^9.0.1",
     "winston": "^3.13.0"
