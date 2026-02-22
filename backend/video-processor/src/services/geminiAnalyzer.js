@@ -91,8 +91,8 @@ async function analyzeClips({ words, videoDurationSeconds, script, gcsUri }) {
           throw new Error(`Word index out of range: start=${clip.start_word_index} end=${clip.end_word_index} max=${words.length - 1}`);
         }
         const wordCount = clip.end_word_index - clip.start_word_index + 1;
-        if (wordCount < 40) {
-          throw new Error(`Clip too short: only ${wordCount} words (minimum 40)`);
+        if (wordCount < 80) {
+          throw new Error(`Clip too short: only ${wordCount} words (minimum 80)`);
         }
       }
 

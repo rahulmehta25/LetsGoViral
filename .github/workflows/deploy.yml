@@ -77,10 +77,10 @@ jobs:
           env_vars_update_strategy: overwrite
 
   # ─────────────────────────────────────────
-  # Build & Update Video Processor Job
+  # Build & Deploy Video Processor Service
   # ─────────────────────────────────────────
   deploy-video-processor:
-    name: Deploy Video Processor Job
+    name: Deploy Video Processor Service
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -109,29 +109,38 @@ jobs:
           docker push ${{ env.JOB_IMAGE }}:${{ github.sha }}
           docker push ${{ env.JOB_IMAGE }}:latest
 
-      - name: Update Cloud Run Job definition
-        run: |
-          gcloud run jobs update clipora-video-processor \
-            --image=${{ env.JOB_IMAGE }}:${{ github.sha }} \
-            --region=${{ env.GCP_REGION }} \
-            --service-account=${{ secrets.GCP_SERVICE_ACCOUNT_EMAIL }} \
-            --vpc-connector=clipora-vpc-connector \
-            --memory=2Gi \
-            --cpu=2 \
-            --task-timeout=3600 \
-            --set-env-vars=NODE_ENV=production,GCP_PROJECT_ID=${{ secrets.GCP_PROJECT_ID }},GCP_REGION=us-east1,GCS_UPLOADS_BUCKET=${{ secrets.GCS_UPLOADS_BUCKET }},GCS_PROCESSED_BUCKET=${{ secrets.GCS_PROCESSED_BUCKET }},CDN_BASE_URL=${{ secrets.CDN_BASE_URL }},TMP_DIR=/tmp/clipora \
-            --set-secrets=DB_PASSWORD=clipora-db-password:latest \
-            || \
-          gcloud run jobs create clipora-video-processor \
-            --image=${{ env.JOB_IMAGE }}:${{ github.sha }} \
-            --region=${{ env.GCP_REGION }} \
-            --service-account=${{ secrets.GCP_SERVICE_ACCOUNT_EMAIL }} \
-            --vpc-connector=clipora-vpc-connector \
-            --memory=2Gi \
-            --cpu=2 \
-            --task-timeout=3600 \
-            --set-env-vars=NODE_ENV=production,GCP_PROJECT_ID=${{ secrets.GCP_PROJECT_ID }},GCP_REGION=us-east1,GCS_UPLOADS_BUCKET=${{ secrets.GCS_UPLOADS_BUCKET }},GCS_PROCESSED_BUCKET=${{ secrets.GCS_PROCESSED_BUCKET }},CDN_BASE_URL=${{ secrets.CDN_BASE_URL }},TMP_DIR=/tmp/clipora \
-            --set-secrets=DB_PASSWORD=clipora-db-password:latest
+      - name: Deploy Video Processor to Cloud Run Service
+        uses: google-github-actions/deploy-cloudrun@v2
+        with:
+          service:  clipora-video-processor
+          region:   ${{ env.GCP_REGION }}
+          image:    ${{ env.JOB_IMAGE }}:${{ github.sha }}
+          flags: |
+            --memory=4Gi
+            --cpu=2
+            --timeout=3600
+            --no-cpu-throttling
+            --concurrency=1
+            --min-instances=0
+            --max-instances=3
+            --vpc-connector=clipora-vpc-connector
+            --service-account=${{ secrets.GCP_SERVICE_ACCOUNT_EMAIL }}
+            --no-allow-unauthenticated
+          env_vars: |
+            NODE_ENV=production
+            GCP_PROJECT_ID=${{ secrets.GCP_PROJECT_ID }}
+            GCP_REGION=us-east1
+            GCS_UPLOADS_BUCKET=${{ secrets.GCS_UPLOADS_BUCKET }}
+            GCS_PROCESSED_BUCKET=${{ secrets.GCS_PROCESSED_BUCKET }}
+            CDN_BASE_URL=${{ secrets.CDN_BASE_URL }}
+            TMP_DIR=/tmp/clipora
+            DB_HOST=${{ secrets.DB_HOST }}
+            DB_PORT=5432
+            DB_NAME=creator_mvp
+            DB_USER=clipora
+          secrets: |
+            DB_PASSWORD=clipora-db-password:latest
+          env_vars_update_strategy: overwrite
 
   # ─────────────────────────────────────────
   # Run Tests (parallel with builds)

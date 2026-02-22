@@ -7,7 +7,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, router } from 'expo-router';
 import { useQuery } from '@tanstack/react-query';
 import { Ionicons } from '@expo/vector-icons';
-import { videosApi } from '@/api/client';
+import { projectsApi, videosApi } from '@/api/client';
 import { useAppStore } from '@/store';
 import { Colors } from '@/constants/Colors';
 import type { Video, Clip, EditGuidanceSuggestion } from '@/store';
@@ -33,7 +33,7 @@ function ClipCard({ clip, onPress }: { clip: Clip; onPress: () => void }) {
       {/* Clip info */}
       <View style={styles.clipInfo}>
         <View style={styles.clipHeader}>
-          <Text style={styles.clipTitle}>Clip {clip.strategic_rank}</Text>
+          <Text style={styles.clipTitle}>{clip.title || `Clip ${clip.strategic_rank}`}</Text>
           <Ionicons name={statusIcon} size={18} color={statusColor} />
         </View>
 
@@ -69,13 +69,8 @@ export default function ProjectDetailScreen() {
   const { data: video, isLoading } = useQuery<Video>({
     queryKey: ['video-by-project', id],
     queryFn:  async () => {
-      // Fetch project details which includes videos
-      const response = await fetch(
-        `${process.env.EXPO_PUBLIC_API_URL}/api/projects/${id}`,
-        { headers: { 'X-API-Key': process.env.EXPO_PUBLIC_API_KEY || '' } }
-      );
-      const data = await response.json();
-      const firstVideo = data.data.videos?.[0];
+      const project = await projectsApi.get(id!);
+      const firstVideo = project.videos?.[0];
       if (!firstVideo) return null;
       return videosApi.get(firstVideo.id);
     },

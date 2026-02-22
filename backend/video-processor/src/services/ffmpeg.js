@@ -111,7 +111,11 @@ async function detectSilences(videoPath, noiseDb = -30, minDuration = 0.3) {
     proc.stderr.on('data', (d) => (stderr += d));
 
     proc.on('close', (code) => {
-      // silencedetect outputs to stderr even on success; exit code 0 expected
+      if (code !== 0) {
+        logger.warn(`FFmpeg silence detection exited with code ${code}`);
+        return resolve([]);
+      }
+
       const silences = [];
       const startRe = /silence_start:\s*([\d.]+)/g;
       const endRe   = /silence_end:\s*([\d.]+)/g;
@@ -162,4 +166,30 @@ function snapToSilence(timestamp, silences, window = 2.0) {
   return bestMid;
 }
 
-module.exports = { cutClip, getVideoDuration, detectSilences, snapToSilence };
+/**
+ * Extract audio from a video file to OGG_OPUS format for Speech-to-Text.
+ *
+ * @param {string} videoPath  Absolute path to the source video
+ * @param {string} outputPath Absolute path for the output .ogg file
+ * @returns {Promise<void>}
+ */
+async function extractAudioOggOpus(videoPath, outputPath) {
+  return new Promise((resolve, reject) => {
+    const proc = spawn('ffmpeg', [
+      '-y', '-i', videoPath,
+      '-vn', '-ac', '1', '-ar', '16000', '-c:a', 'libopus', '-b:a', '32k',
+      outputPath,
+    ]);
+    let stderr = '';
+    proc.stderr.on('data', (d) => (stderr += d));
+    proc.on('close', (code) => {
+      if (code === 0) return resolve();
+      reject(new Error(`FFmpeg audio extraction exited ${code}: ${stderr.slice(-500)}`));
+    });
+    proc.on('error', (err) => {
+      reject(new Error(`Failed to spawn FFmpeg for audio extraction: ${err.message}`));
+    });
+  });
+}
+
+module.exports = { cutClip, getVideoDuration, detectSilences, snapToSilence, extractAudioOggOpus };

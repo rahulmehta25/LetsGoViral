@@ -20,3 +20,9 @@ variable "mvp_api_key" {
   type        = string
   sensitive   = true
 }
+
+variable "video_processor_service_url" {
+  description = "Cloud Run Service URL for the video processor (used as Pub/Sub push endpoint)"
+  type        = string
+  default     = "https://clipora-video-processor-594534640965.us-east1.run.app/"
+}

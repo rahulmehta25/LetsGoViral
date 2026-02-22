@@ -20,7 +20,8 @@ const PORT = process.env.PORT || 8080;
 
 // ─── Security & Parsing ────────────────────────────────────────────────────
 app.use(helmet());
-app.use(cors({ origin: '*' }));          // Restrict origins in production
+const CORS_ORIGINS = process.env.CORS_ORIGINS;
+app.use(cors(CORS_ORIGINS ? { origin: CORS_ORIGINS.split(',') } : {}));
 app.use(express.json({ limit: '1mb' })); // No large bodies — videos go direct to GCS
 app.use(morgan('combined', { stream: { write: msg => logger.info(msg.trim()) } }));
 

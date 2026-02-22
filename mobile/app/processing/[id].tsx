@@ -26,15 +26,20 @@ const STATUS_WEIGHT: Record<string, number> = {
 export default function ProcessingScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
 
+  const MAX_POLLS = 120;
+  const pollCountRef = React.useRef(0);
+
   const { data: video } = useQuery({
     queryKey: ['video', id],
-    queryFn:  () => videosApi.get(id!),
+    queryFn:  () => {
+      pollCountRef.current += 1;
+      return videosApi.get(id!);
+    },
     enabled:  !!id,
-    // Poll every 5 seconds while still processing; stop at COMPLETED/FAILED
-    // Also stop after ~10 minutes (120 polls × 5 seconds)
     refetchInterval: (query) => {
       const status = query.state.data?.processing_status;
       if (status === 'COMPLETED' || status === 'FAILED') return false;
+      if (pollCountRef.current >= MAX_POLLS) return false;
       return 5000;
     },
     refetchIntervalInBackground: false,
