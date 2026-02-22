@@ -7,11 +7,13 @@ import {
   Clip,
 } from '../types';
 
-const API_BASE_URL = import.meta.env.VITE_API_URL as string;
-const API_KEY = import.meta.env.VITE_API_KEY as string;
+// In dev: empty string = use same origin (Vite proxy forwards /api to Cloud Run).
+// In prod: VITE_API_URL must be set explicitly or the build fails at runtime.
+const API_BASE_URL = import.meta.env.VITE_API_URL !== undefined ? (import.meta.env.VITE_API_URL as string) : 'http://localhost:8080';
+const API_KEY = (import.meta.env.VITE_API_KEY as string | undefined) || 'dev-api-key';
 
-if (!API_BASE_URL) throw new Error('VITE_API_URL environment variable is required');
-if (!API_KEY) throw new Error('VITE_API_KEY environment variable is required');
+if (import.meta.env.PROD && !API_BASE_URL) throw new Error('VITE_API_URL environment variable is required in production');
+if (import.meta.env.PROD && !API_KEY) throw new Error('VITE_API_KEY environment variable is required in production');
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE_URL}/api${path}`, {
