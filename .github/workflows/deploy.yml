@@ -75,6 +75,7 @@ jobs:
           secrets: |
             MVP_API_KEY=clipora-api-key:latest
             DB_PASSWORD=clipora-db-password:latest
+            ELEVEN_LABS_API_KEY=clipora-elevenlabs-api-key:latest
           env_vars_update_strategy: overwrite
 
   # ─────────────────────────────────────────

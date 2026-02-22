@@ -559,3 +559,60 @@ Each mock is consumed in order by subsequent `db.query()` calls in the route han
 All 8 tests in projects.test.js now passing (CRUD operations all working correctly)
 
 ---
+
+## 2026-02-21 — Merge feature/sfx-overlay with Pre-Merge Checklist Complete
+
+### User Prompt
+"Fetch latest from feature/sfx-overlay branch and complete pre-merge critical checklist before merging."
+
+### Pre-Merge Checklist Results
+
+1. **DB Migrations 002/003**: ALREADY APPLIED
+   - All 5 columns exist on production clips table: sound_url, sound_prompt, sound_type, sfx_data, sfx_video_url
+
+2. **ELEVEN_LABS_API_KEY**: SET
+   - Created clipora-elevenlabs-api-key in GCP Secret Manager
+   - Set GitHub Actions secret ELEVEN_LABS_API_KEY
+   - Added ELEVEN_LABS_API_KEY to deploy.yml secrets section for api-service
+   - Granted clipora-service-account@clipora-487805.iam.gserviceaccount.com IAM access to secret
+
+3. **FFmpeg in api-service Docker**: VERIFIED
+   - Branch Dockerfile adds `apt-get install ffmpeg`, will apply on merge
+
+4. **Auto-generation behavior**: REVIEWED
+   - useEffect has guards: skips if clip already has sfx_data
+   - Skips if already attempted in session (prevents infinite loops)
+   - One ElevenLabs API call per new clip, not on every render
+   - Behavior is reasonable for MVP scope
+
+5. **cloud-sql-proxy binary (32MB)**: NOT TRACKED IN GIT
+   - Exists on disk only, added to .gitignore to prevent accidental commits
+
+### Actions Taken
+- Fetched origin/feature/sfx-overlay branch
+- Merged into main (13 files, +1209 lines)
+- Added ELEVEN_LABS_API_KEY secret mapping to deploy.yml for clipora-api service
+- Created clipora-elevenlabs-api-key in GCP Secret Manager
+- Set ELEVEN_LABS_API_KEY as GitHub Actions secret
+- Granted clipora-service-account access to ElevenLabs API secret
+- Added cloud-sql-proxy to .gitignore to exclude development binaries
+
+### Files Modified
+- `.github/workflows/deploy.yml` — added ELEVEN_LABS_API_KEY secret mapping for api-service
+- `.gitignore` — added cloud-sql-proxy exclusion
+
+### Files Added from Branch Merge
+- `backend/api-service/src/routes/clips.js` — SFX endpoints (generate, CRUD, mix)
+- `backend/api-service/src/services/elevenlabs.js` — ElevenLabs sound generation service
+- `backend/api-service/src/services/sfxMixer.js` — FFmpeg video/audio mixer
+- `backend/api-service/src/services/soundAnalyzer.js` — Gemini tone analysis service
+- `infrastructure/database/migrations/002_sound_effects.sql`
+- `infrastructure/database/migrations/003_sfx_overlay.sql`
+- `PlayO Prototyping Studio UI/src/screens/ClipReviewerScreen.tsx` (major update)
+- `PlayO Prototyping Studio UI/src/lib/api.ts` (SFX API methods)
+- `PlayO Prototyping Studio UI/src/types.ts` (SFX types)
+
+### Technical Summary
+Sound effects overlay feature merged successfully. Infrastructure ready: database migrations applied, API secrets configured in GCP Secret Manager and GitHub Actions, ElevenLabs integration fully wired. API service will auto-generate sound effects on first clip review (with session dedup). Frontend updated with SFX UI components and API client methods.
+
+---

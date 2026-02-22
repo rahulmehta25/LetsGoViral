@@ -22,6 +22,7 @@ gcp-key.json
 
 # Binary assets (use external storage instead)
 resized/
+cloud-sql-proxy
 
 # Build / IDE
 dist/
