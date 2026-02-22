@@ -1,14 +1,9 @@
 FROM node:22-slim
 
-<<<<<<< HEAD
-# Install FFmpeg (needed for finalize-clips endpoint)
+# Install FFmpeg (needed for clip cutting and SFX/music mixing)
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ffmpeg \
  && rm -rf /var/lib/apt/lists/*
-=======
-# Install FFmpeg for SFX video mixing
-RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg && rm -rf /var/lib/apt/lists/*
->>>>>>> main
 
 # Set working directory
 WORKDIR /usr/src/app
