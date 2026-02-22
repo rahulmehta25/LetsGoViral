@@ -28,14 +28,14 @@ async function downloadToBuffer(url) {
 }
 
 /**
- * Mix sfxItems onto a clip video at their respective timestamps.
- * Each item may include an optional `volume` (0.0–1.0, default 1.0)
- * to control per-track loudness (useful for quieter background music).
+ * Mix sfxItems (and optional background music) onto a clip video.
+ * Each SFX item may include an optional `volume` (0.0–1.0, default 1.0).
  * @param {string} clipCdnUrl - CDN URL of the source clip video
  * @param {Array<{sfx_url: string, timestamp_seconds: number, volume?: number}>} sfxItems
+ * @param {{track_url: string, volume?: number} | null} [musicData] - optional background music
  * @returns {Promise<Buffer>} - Buffer of the output MP4
  */
-async function mixSfxOntoVideo(clipCdnUrl, sfxItems) {
+async function mixSfxOntoVideo(clipCdnUrl, sfxItems, musicData) {
   const tmpDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'sfxmix-'));
   const tmpFiles = [];
 
@@ -54,6 +54,15 @@ async function mixSfxOntoVideo(clipCdnUrl, sfxItems) {
       await fs.promises.writeFile(sfxPath, sfxBuffer);
       sfxPaths.push(sfxPath);
       tmpFiles.push(sfxPath);
+    }
+
+    // Download background music track (if selected)
+    let musicPath = null;
+    if (musicData && musicData.track_url) {
+      musicPath = path.join(tmpDir, 'music.mp3');
+      const musicBuffer = await downloadToBuffer(musicData.track_url);
+      await fs.promises.writeFile(musicPath, musicBuffer);
+      tmpFiles.push(musicPath);
     }
 
     // Check if video has an audio stream using ffprobe
@@ -76,31 +85,43 @@ async function mixSfxOntoVideo(clipCdnUrl, sfxItems) {
     tmpFiles.push(outputPath);
 
     // Build FFmpeg args
-    // Inputs: [0] video, [1..N] sfx files
+    // Inputs: [0] video, [1..N] sfx files, [N+1] music (if present)
     const ffmpegArgs = ['-i', videoPath];
     for (const sfxPath of sfxPaths) {
       ffmpegArgs.push('-i', sfxPath);
     }
+    const musicInputIndex = sfxItems.length + 1; // input index for music file
+    if (musicPath) {
+      ffmpegArgs.push('-i', musicPath);
+    }
 
     // Build filter_complex
     // Each SFX: [N:a]volume=V,adelay=Xms|Xms[sN]
-    // Then mix: [0:a][s0][s1]...[sN-1]amix=inputs=M:normalize=0[aout]
     const delayFilters = sfxItems.map((item, i) => {
       const delayMs = Math.round(item.timestamp_seconds * 1000);
       const vol = typeof item.volume === 'number' ? Math.max(0, Math.min(1, item.volume)) : 1.0;
       return `[${i + 1}:a]volume=${vol},adelay=${delayMs}|${delayMs}[s${i}]`;
     });
 
+    // Background music: apply volume and loop with aloop to cover the clip duration
+    if (musicPath) {
+      const musicVol = typeof musicData.volume === 'number' ? Math.max(0, Math.min(1, musicData.volume)) : 0.5;
+      delayFilters.push(`[${musicInputIndex}:a]aloop=loop=-1:size=2e+09,volume=${musicVol}[bgm]`);
+    }
+
     let mixInputs;
     let amixInputCount;
+    const sfxLabels = sfxItems.map((_, i) => `[s${i}]`).join('');
+    const musicLabel = musicPath ? '[bgm]' : '';
+
     if (videoHasAudio) {
-      mixInputs = `[0:a]${sfxItems.map((_, i) => `[s${i}]`).join('')}`;
-      amixInputCount = sfxItems.length + 1;
+      mixInputs = `[0:a]${sfxLabels}${musicLabel}`;
+      amixInputCount = sfxItems.length + 1 + (musicPath ? 1 : 0);
     } else {
-      // No audio track — mix SFX only with a silent base using aevalsrc
+      // No audio track — mix with a silent base using aevalsrc
       delayFilters.unshift('aevalsrc=0:c=stereo:r=44100:d=60[silence]');
-      mixInputs = `[silence]${sfxItems.map((_, i) => `[s${i}]`).join('')}`;
-      amixInputCount = sfxItems.length + 1;
+      mixInputs = `[silence]${sfxLabels}${musicLabel}`;
+      amixInputCount = sfxItems.length + 1 + (musicPath ? 1 : 0);
     }
 
     const filterComplex = [
@@ -119,6 +140,7 @@ async function mixSfxOntoVideo(clipCdnUrl, sfxItems) {
       outputPath,
     );
 
+    logger.info(`FFmpeg mix command: ffmpeg ${ffmpegArgs.join(' ')}`);
     await execFileAsync('ffmpeg', ffmpegArgs);
 
     const outputBuffer = await fs.promises.readFile(outputPath);

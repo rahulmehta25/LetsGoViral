@@ -121,6 +121,11 @@ export const webApi = {
         method: 'POST',
         body: JSON.stringify(payload),
       }),
+    setMusic: (clipId: string, payload: { track_id: string; track_url: string; volume: number } | null) =>
+      request<{ clip: Clip }>(`/clips/${clipId}/music`, {
+        method: 'PUT',
+        body: JSON.stringify(payload || { track_id: null, track_url: null, volume: 0 }),
+      }),
   },
   scripts: {
     create: (projectId: string) =>

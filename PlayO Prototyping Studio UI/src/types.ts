@@ -73,6 +73,7 @@ export interface Clip {
   sound_type: 'sfx' | 'music' | null;
   sfx_data: SfxItem[] | null;
   sfx_video_url: string | null;
+  music_data: { track_id: string; track_url: string; volume: number } | null;
 }
 
 export interface VideoDetails {
