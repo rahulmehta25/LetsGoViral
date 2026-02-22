@@ -8,7 +8,8 @@ import {
 } from '../types';
 
 // Empty string = use same origin (Vite proxy in dev). Omitted = local API on 8080.
-const API_BASE_URL = import.meta.env.VITE_API_URL !== undefined ? (import.meta.env.VITE_API_URL as string) : 'http://localhost:8080';
+const rawApiUrl = import.meta.env.VITE_API_URL;
+const API_BASE_URL = typeof rawApiUrl === 'string' ? rawApiUrl.replace(/\/+$/, '') : 'http://localhost:8080';
 const API_KEY = (import.meta.env.VITE_API_KEY as string | undefined) || 'dev-api-key';
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -61,6 +62,16 @@ export const webApi = {
         body: JSON.stringify(payload),
       }),
     get: (videoId: string) => request<VideoDetails>(`/videos/${videoId}`),
+    getSourcePreview: (videoId: string) =>
+      request<{ source_video_url: string }>(`/videos/${videoId}/source-preview`),
+    finalizeClips: (
+      videoId: string,
+      clips: Array<{ id: string; start_time_seconds: number; end_time_seconds: number }>,
+    ) =>
+      request<{ video_id: string; clips: Clip[] }>(`/videos/${videoId}/finalize-clips`, {
+        method: 'POST',
+        body: JSON.stringify({ clips }),
+      }),
   },
   clips: {
     updateApproval: (clipId: string, userApproved: boolean) =>

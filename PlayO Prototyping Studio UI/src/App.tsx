@@ -35,6 +35,14 @@ export function App() {
   };
 
   const hideToast = () => setToast((prev) => ({ ...prev, visible: false }));
+  // Clips need the reviewer if they have start/end timestamps but no CDN URL yet
+  // (new pipeline: processor saves candidates, user reviews, then ffmpeg cuts).
+  // Old pipeline clips (cdn_url set during processing) skip straight to detail.
+  const needsClipReview = (video: VideoDetails | null) => {
+    const clips = video?.clips || [];
+    if (clips.length === 0) return false;
+    return clips.some((clip) => !clip.cdn_url && clip.start_time_seconds != null);
+  };
 
   const loadProjects = async () => {
     setIsLoadingProjects(true);
@@ -85,6 +93,11 @@ export function App() {
       showToast('Select or create a project first', 'info');
       return;
     }
+    if (nextScreen === 'detail' && currentVideo && needsClipReview(currentVideo)) {
+      showToast('Review timeline and approve cuts before viewing individual clips', 'info');
+      setCurrentScreen('reviewer');
+      return;
+    }
     setCurrentScreen(nextScreen);
   };
 
@@ -97,10 +110,16 @@ export function App() {
     setCurrentProjectId(projectId);
     try {
       const details = await webApi.projects.get(projectId);
-      const video = details.videos[0];
-      if (video) {
-        setCurrentVideoId(video.id);
-        setCurrentScreen(video.processing_status === 'COMPLETED' ? 'detail' : 'processing');
+      const firstVideo = details.videos[0];
+      if (firstVideo) {
+        setCurrentVideoId(firstVideo.id);
+        if (firstVideo.processing_status === 'COMPLETED') {
+          const fullVideo = await webApi.videos.get(firstVideo.id);
+          setCurrentVideo(fullVideo);
+          setCurrentScreen(needsClipReview(fullVideo) ? 'reviewer' : 'detail');
+        } else {
+          setCurrentScreen('processing');
+        }
       } else {
         setCurrentScreen('upload');
       }
@@ -120,20 +139,18 @@ export function App() {
     setCurrentVideo(video);
     setCurrentVideoId(video.id);
     await loadProjects();
-    setCurrentScreen('detail');
+    setCurrentScreen(needsClipReview(video) ? 'reviewer' : 'detail');
   };
 
-  const handleClipApproval = async (clipId: string, approved: boolean) => {
-    try {
-      await webApi.clips.updateApproval(clipId, approved);
-      if (currentVideoId) {
-        const refreshed = await webApi.videos.get(currentVideoId);
-        setCurrentVideo(refreshed);
-      }
-      showToast(approved ? 'Clip approved' : 'Clip rejected', 'success');
-    } catch (error) {
-      showToast(error instanceof Error ? error.message : 'Failed to update clip', 'error');
-    }
+  const handleFinalizeClips = async (
+    clipEdits: Array<{ id: string; start_time_seconds: number; end_time_seconds: number }>,
+  ) => {
+    if (!currentVideoId) throw new Error('No video selected');
+    await webApi.videos.finalizeClips(currentVideoId, clipEdits);
+    const refreshed = await webApi.videos.get(currentVideoId);
+    setCurrentVideo(refreshed);
+    showToast('Clips finalized with ffmpeg', 'success');
+    setCurrentScreen('detail');
   };
 
   const openReviewer = (clip: Clip) => {
@@ -186,22 +203,33 @@ export function App() {
           />
         );
       case 'detail':
+        if (currentVideo && needsClipReview(currentVideo)) {
+          return (
+            <ClipReviewerScreen
+              onNavigate={navigateTo}
+              video={currentVideo}
+              startIndex={reviewerClipIndex}
+              onFinalize={handleFinalizeClips}
+              onError={(message) => showToast(message, 'error')}
+            />
+          );
+        }
         return (
           <ProjectDetailScreen
             onNavigate={navigateTo}
             projectName={currentProject?.name || 'Project Detail'}
             video={currentVideo}
             onOpenReviewer={openReviewer}
-            onUpdateClipStatus={handleClipApproval}
           />
         );
       case 'reviewer':
         return (
           <ClipReviewerScreen
             onNavigate={navigateTo}
-            clips={currentVideo?.clips || []}
+            video={currentVideo}
             startIndex={reviewerClipIndex}
-            onUpdateClipStatus={handleClipApproval}
+            onFinalize={handleFinalizeClips}
+            onError={(message) => showToast(message, 'error')}
           />
         );
       default:
