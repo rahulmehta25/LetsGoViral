@@ -52,6 +52,7 @@ export interface SfxItem {
   prompt: string;
   sfx_url: string;
   duration_seconds: number;
+  volume?: number;
 }
 
 export interface Clip {

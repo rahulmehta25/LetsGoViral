@@ -152,11 +152,15 @@ router.post('/:id/generate-sfx', async (req, res) => {
     })
   );
 
-  // Step 3: Mix SFX onto the original clip video (skip if clip not yet exported)
+  // Step 3: Mix SFX onto the original clip video (skip if clip not yet exported or file missing)
   let sfxVideoUrl = null;
   if (clip.cdn_url) {
-    const videoBuffer = await mixSfxOntoVideo(clip.cdn_url, sfxItems);
-    sfxVideoUrl = await uploadMixedVideoToGCS(videoBuffer, clipId);
+    try {
+      const videoBuffer = await mixSfxOntoVideo(clip.cdn_url, sfxItems);
+      sfxVideoUrl = await uploadMixedVideoToGCS(videoBuffer, clipId);
+    } catch (mixErr) {
+      // Video file may not exist — skip mixing, SFX audio is still saved
+    }
   }
 
   // Step 4: Persist to DB

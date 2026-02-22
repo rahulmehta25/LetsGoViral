@@ -51,7 +51,7 @@ export function useChat() {
     try {
       const genAI = new GoogleGenerativeAI(API_KEY);
       const model = genAI.getGenerativeModel({
-        model: 'gemini-3-flash-preview',
+        model: 'gemini-2.0-flash',
         systemInstruction: SYSTEM_PROMPT,
       });
 

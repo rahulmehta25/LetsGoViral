@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, Play, Pause, Wand2, RefreshCw, Loader2, Pencil, Plus, X, SendHorizonal } from 'lucide-react';
+import { ArrowLeft, Play, Pause, Wand2, RefreshCw, Loader2, Pencil, Plus, X, Volume2, VolumeX, Sparkles, SendHorizonal } from 'lucide-react';
 import { Clip, VideoDetails, SfxItem } from '../types';
 import { webApi } from '../lib/api';
 
@@ -38,6 +38,7 @@ export function ClipReviewerScreen({
   const timelineRef = useRef<HTMLDivElement>(null);
   const scrubberRef = useRef<HTMLDivElement>(null);
   const retriedSourceRef = useRef(false);
+  const sfxAudioRefs = useRef<Map<string, HTMLAudioElement>>(new Map());
 
   // ── Clip editor state ──
   const [isPlaying, setIsPlaying] = useState(false);
@@ -71,6 +72,8 @@ export function ClipReviewerScreen({
 
   // ── SFX state (per-clip, keyed by clip ID) ──
   const [localSfx, setLocalSfx] = useState<Record<string, LocalClipSfx>>({});
+  // Guard against repeated auto-generation across re-renders
+  const sfxTriggeredRef = useRef<Set<string>>(new Set());
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState('');
   const [editLoading, setEditLoading] = useState(false);
@@ -145,6 +148,9 @@ export function ClipReviewerScreen({
     setNewSfxPrompt('');
     setNewSfxTimestamp(0);
     setDraggingSfxId(null);
+    // Stop any SFX preview
+    if (previewAudioRef.current) { previewAudioRef.current.pause(); previewAudioRef.current = null; }
+    setPreviewingSfxId(null);
   }, [activeIndex]);
 
   // ── Auto-generate SFX when active clip loads (if not already generated) ──
@@ -154,8 +160,9 @@ export function ClipReviewerScreen({
     if (!activeClip) return;
     const clipId = activeClip.id;
     const alreadyHasSfx = activeClip.sfx_data && activeClip.sfx_data.length > 0;
-    const alreadyAttempted = clipId in localSfx;
-    if (alreadyHasSfx || alreadyAttempted) return;
+    // Use a ref to guard against re-renders triggering repeated API calls for the same clip
+    if (alreadyHasSfx || sfxTriggeredRef.current.has(clipId)) return;
+    sfxTriggeredRef.current.add(clipId);
 
     setLocalSfx((prev) => ({
       ...prev,
@@ -223,6 +230,108 @@ export function ClipReviewerScreen({
     v.currentTime = bounded;
     setCurrentTime(bounded);
   };
+
+  // ── Client-side SFX audio playback ──
+  // Always keep a ref to the latest SFX data for the active clip (read by timeupdate handler)
+  const activeSfxDataRef = useRef<SfxItem[]>([]);
+  const latestSfxData = useMemo(() => {
+    const clip = editableClips[activeIndex];
+    if (!clip) return [];
+    const state = localSfx[clip.id];
+    if (clip.sfx_data && clip.sfx_data.length > 0) return clip.sfx_data;
+    return state?.sfxData ?? [];
+  }, [editableClips, activeIndex, localSfx]);
+  activeSfxDataRef.current = latestSfxData;
+
+  // Track SFX item IDs so we only recreate audio elements when items are added/removed
+  const sfxItemIds = useMemo(() => latestSfxData.map((s) => s.id).join(','), [latestSfxData]);
+
+  // Create/remove audio elements only when the set of SFX items changes (not on volume changes)
+  useEffect(() => {
+    const audioMap = sfxAudioRefs.current;
+    const currentIds = new Set(latestSfxData.map((s) => s.id));
+
+    // Remove audio elements for SFX items that no longer exist
+    audioMap.forEach((audio, id) => {
+      if (!currentIds.has(id)) {
+        audio.pause();
+        audio.src = '';
+        audioMap.delete(id);
+      }
+    });
+    // Create audio elements for new SFX items
+    for (const sfx of latestSfxData) {
+      if (!audioMap.has(sfx.id) && sfx.sfx_url) {
+        const audio = new Audio(sfx.sfx_url);
+        audio.preload = 'auto';
+        audio.volume = typeof sfx.volume === 'number' ? sfx.volume : 1.0;
+        audioMap.set(sfx.id, audio);
+      }
+    }
+    return () => {
+      audioMap.forEach((audio) => { audio.pause(); audio.src = ''; });
+      audioMap.clear();
+    };
+  }, [activeIndex, sfxItemIds]);
+
+  // Sync SFX playback with video timeupdate
+  useEffect(() => {
+    const v = videoRef.current;
+    if (!v) return;
+
+    const activeClipObj = editableClips[activeIndex];
+    if (!activeClipObj) return;
+    const clipStart = activeClipObj.start;
+
+    const onTimeUpdate = () => {
+      const videoTime = v.currentTime;
+      const clipRelativeTime = videoTime - clipStart;
+      const audioMap = sfxAudioRefs.current;
+
+      for (const sfx of activeSfxDataRef.current) {
+        const audio = audioMap.get(sfx.id);
+        if (!audio || !sfx.sfx_url) continue;
+
+        const sfxStart = sfx.timestamp_seconds;
+        const sfxDur = sfx.duration_seconds || 2;
+        const sfxEnd = sfxStart + sfxDur;
+
+        if (clipRelativeTime >= sfxStart && clipRelativeTime < sfxEnd && !v.paused) {
+          const expectedPos = clipRelativeTime - sfxStart;
+          // Only seek if audio is significantly out of sync (>0.3s)
+          if (Math.abs(audio.currentTime - expectedPos) > 0.3) {
+            audio.currentTime = expectedPos;
+          }
+          // Always sync volume so slider changes take effect immediately
+          audio.volume = typeof sfx.volume === 'number' ? sfx.volume : 1.0;
+          if (audio.paused) {
+            audio.play().catch(() => {});
+          }
+        } else {
+          if (!audio.paused) audio.pause();
+        }
+      }
+    };
+
+    const onPause = () => {
+      sfxAudioRefs.current.forEach((audio) => audio.pause());
+    };
+
+    const onSeeked = () => {
+      // Reset all SFX audio positions on seek
+      sfxAudioRefs.current.forEach((audio) => { audio.pause(); audio.currentTime = 0; });
+    };
+
+    v.addEventListener('timeupdate', onTimeUpdate);
+    v.addEventListener('pause', onPause);
+    v.addEventListener('seeked', onSeeked);
+
+    return () => {
+      v.removeEventListener('timeupdate', onTimeUpdate);
+      v.removeEventListener('pause', onPause);
+      v.removeEventListener('seeked', onSeeked);
+    };
+  }, [activeIndex, editableClips]);
 
   // ── Segment edge dragging ──
   const beginHandleDrag = (e: React.PointerEvent, clipIdx: number, edge: 'start' | 'end') => {
@@ -357,6 +466,8 @@ export function ClipReviewerScreen({
   const handleRegen = () => {
     if (!activeClip) return;
     const clipId = activeClip.id;
+    // Allow re-trigger for manual regeneration
+    sfxTriggeredRef.current.delete(clipId);
     setLocalSfx((prev) => ({
       ...prev,
       [clipId]: { sfxData: null, sfxVideoUrl: null, loading: true, error: null },
@@ -412,7 +523,7 @@ export function ClipReviewerScreen({
     const clipId = activeClip.id;
     setEditLoading(true);
     try {
-      const result = await webApi.clips.updateSfxItem(clipId, sfxId, editDraft.trim());
+      const result = await webApi.clips.updateSfxItem(clipId, sfxId, { prompt: editDraft.trim() });
       setLocalSfx((prev) => ({
         ...prev,
         [clipId]: {
@@ -436,6 +547,70 @@ export function ClipReviewerScreen({
     } finally {
       setEditLoading(false);
     }
+  };
+
+  // Volume change — update locally for instant feedback, debounce API call
+  const volumeTimerRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+  const handleVolumeChange = (sfxId: string, newVolume: number) => {
+    if (!activeClip) return;
+    const clipId = activeClip.id;
+
+    // Update editableClips sfx_data (used when the clip already has server-side SFX)
+    setEditableClips((prev) =>
+      prev.map((c) => {
+        if (c.id !== clipId || !c.sfx_data) return c;
+        return {
+          ...c,
+          sfx_data: c.sfx_data.map((s) => s.id === sfxId ? { ...s, volume: newVolume } : s),
+        };
+      })
+    );
+
+    // Update localSfx (used when SFX was freshly generated in this session)
+    setLocalSfx((prev) => {
+      const current = prev[clipId];
+      if (!current?.sfxData) return prev;
+      return {
+        ...prev,
+        [clipId]: {
+          ...current,
+          sfxData: current.sfxData.map((s) =>
+            s.id === sfxId ? { ...s, volume: newVolume } : s
+          ),
+        },
+      };
+    });
+
+    // Also update the live audio element volume
+    const audio = sfxAudioRefs.current.get(sfxId);
+    if (audio) audio.volume = newVolume;
+
+    // Debounce API call (save after 500ms of no changes)
+    if (volumeTimerRef.current[sfxId]) clearTimeout(volumeTimerRef.current[sfxId]);
+    volumeTimerRef.current[sfxId] = setTimeout(() => {
+      webApi.clips.updateSfxItem(clipId, sfxId, { volume: newVolume }).catch(() => {});
+    }, 500);
+  };
+
+  // Preview a single SFX audio
+  const [previewingSfxId, setPreviewingSfxId] = useState<string | null>(null);
+  const previewAudioRef = useRef<HTMLAudioElement | null>(null);
+  const handlePreviewSfx = (sfx: SfxItem) => {
+    // Stop any current preview
+    if (previewAudioRef.current) {
+      previewAudioRef.current.pause();
+      previewAudioRef.current = null;
+    }
+    if (previewingSfxId === sfx.id) {
+      setPreviewingSfxId(null);
+      return;
+    }
+    const audio = new Audio(sfx.sfx_url);
+    audio.volume = typeof sfx.volume === 'number' ? sfx.volume : 1.0;
+    audio.onended = () => { setPreviewingSfxId(null); previewAudioRef.current = null; };
+    audio.play().catch(() => {});
+    previewAudioRef.current = audio;
+    setPreviewingSfxId(sfx.id);
   };
 
   const handleDragStart = useCallback((sfxId: string, currentTimestamp: number) => {
@@ -548,14 +723,19 @@ export function ClipReviewerScreen({
   const playheadPct = (currentTime / timelineDuration) * 100;
 
   // SFX data for the currently active clip
+  // Prefer localSfx (client-side changes from regen/add/edit/delete) over server data
   const sfxClipState = activeClip ? localSfx[activeClip.id] : undefined;
-  const sfxData: SfxItem[] = activeClip?.sfx_data && activeClip.sfx_data.length > 0
-    ? activeClip.sfx_data
-    : (sfxClipState?.sfxData ?? []);
+  const sfxData: SfxItem[] = sfxClipState?.sfxData && sfxClipState.sfxData.length > 0
+    ? sfxClipState.sfxData
+    : (activeClip?.sfx_data && activeClip.sfx_data.length > 0 ? activeClip.sfx_data : []);
   const sfxVideoUrl = sfxClipState?.sfxVideoUrl ?? activeClip?.sfx_video_url ?? null;
   const sfxLoading = sfxClipState?.loading ?? false;
   const sfxError = sfxClipState?.error ?? null;
   const clipDuration = activeClip ? activeClip.end - activeClip.start : 10;
+
+  // Use the SFX-mixed video when available, otherwise fall back to source.
+  // When sfxVideoUrl is null (clip not yet exported), client-side audio sync handles playback.
+  const activeVideoUrl = sfxVideoUrl || sourceVideoUrl;
 
   return (
     <div className="fixed inset-0 bg-[#F5F5F5] flex flex-col animate-fade-in">
@@ -583,11 +763,11 @@ export function ClipReviewerScreen({
       <main className="flex-1 p-4 overflow-y-auto pb-28 max-w-6xl w-full mx-auto space-y-4">
         {/* ── Video Player ── */}
         <div className="bg-black rounded-2xl overflow-hidden relative aspect-video shadow-xl">
-          {sourceVideoUrl ? (
+          {activeVideoUrl ? (
             <video
-              key={`${sourceVideoUrl}-${sourceNonce}`}
+              key={`${activeVideoUrl}-${sourceNonce}`}
               ref={videoRef}
-              src={sourceVideoUrl}
+              src={activeVideoUrl}
               className="w-full h-full object-contain"
               playsInline
               preload="metadata"
@@ -655,8 +835,11 @@ export function ClipReviewerScreen({
             style={{ touchAction: 'none' }}
           >
             {editableClips.map((clip, i) => {
-              const left = (clip.start / timelineDuration) * 100;
-              const width = Math.max(0.5, ((clip.end - clip.start) / timelineDuration) * 100);
+              const rawLeft = (clip.start / timelineDuration) * 100;
+              const rawRight = (clip.end / timelineDuration) * 100;
+              const left = Math.max(0, Math.min(100, rawLeft));
+              const right = Math.max(0, Math.min(100, rawRight));
+              const width = Math.max(0.5, right - left);
               const color = SEGMENT_COLORS[i % SEGMENT_COLORS.length];
               const active = activeIndex === i;
 
@@ -819,51 +1002,65 @@ export function ClipReviewerScreen({
                     className="mt-4 border border-gray-200 rounded-xl overflow-hidden"
                     onClick={(e) => e.stopPropagation()}
                   >
-                    <div className="flex items-center justify-between px-3 py-2 bg-gray-50 border-b border-gray-100">
-                      <div className="flex items-center gap-1.5 font-semibold text-gray-800 text-xs">
-                        <span>🎧</span> Sound Effects
-                        {sfxVideoUrl && (
-                          <span className="text-[9px] font-medium text-[#00D4AA] bg-[#00D4AA]/10 px-1.5 py-0.5 rounded-full">Mixed</span>
+                    {/* Header */}
+                    <div className="flex items-center justify-between px-4 py-2.5 bg-gradient-to-r from-gray-50 to-white border-b border-gray-100">
+                      <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-1.5 font-semibold text-gray-800 text-xs">
+                          <Sparkles size={13} className="text-[#00D4AA]" />
+                          Recommended Sound Effects
+                        </div>
+                        {sfxData.length > 0 && (
+                          <span className="text-[9px] font-medium text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded-full">
+                            AI-generated
+                          </span>
                         )}
                       </div>
                       <div className="flex items-center gap-2">
                         <button
                           onClick={() => { setAddSfxOpen(true); setNewSfxTimestamp(clipDuration * 0.5); setNewSfxPrompt(''); }}
                           disabled={sfxLoading}
-                          className="flex items-center gap-1 text-[10px] text-gray-500 hover:text-[#00D4AA] disabled:opacity-40 transition-colors"
+                          className="flex items-center gap-1 px-2 py-1 text-[10px] font-medium text-[#00D4AA] hover:bg-[#00D4AA]/10 rounded-full disabled:opacity-40 transition-colors"
                         >
-                          <Plus size={11} /> Add
+                          <Plus size={11} /> Add Custom
                         </button>
                         <button
                           onClick={handleRegen}
                           disabled={sfxLoading}
-                          className="flex items-center gap-1 text-[10px] text-gray-500 hover:text-gray-800 disabled:opacity-40 transition-colors"
+                          className="flex items-center gap-1 px-2 py-1 text-[10px] text-gray-500 hover:bg-gray-100 rounded-full disabled:opacity-40 transition-colors"
                           title="Re-analyze and regenerate all SFX"
                         >
-                          <RefreshCw size={10} className={sfxLoading ? 'animate-spin' : ''} /> Regen
+                          <RefreshCw size={10} className={sfxLoading ? 'animate-spin' : ''} /> Regenerate
                         </button>
                       </div>
                     </div>
 
-                    <div className="px-3 py-2.5">
+                    <div className="px-4 py-3">
                       {sfxLoading ? (
-                        <div className="flex items-center gap-2 text-xs text-gray-500 py-1">
-                          <Loader2 size={12} className="animate-spin text-[#00D4AA]" />
-                          <span>Generating SFX... (~20s)</span>
+                        <div className="flex items-center gap-2 text-xs text-gray-500 py-3 justify-center">
+                          <Loader2 size={14} className="animate-spin text-[#00D4AA]" />
+                          <span>Analyzing clip and generating sound effects... (~20s)</span>
                         </div>
                       ) : sfxError ? (
-                        <div className="flex items-center justify-between py-1">
-                          <p className="text-[10px] text-red-500">{sfxError}</p>
-                          <button onClick={handleRegen} className="text-[10px] text-[#00D4AA] font-medium hover:underline ml-2 shrink-0">
+                        <div className="flex items-center justify-between py-2">
+                          <p className="text-xs text-red-500">{sfxError}</p>
+                          <button onClick={handleRegen} className="text-xs text-[#00D4AA] font-medium hover:underline ml-2 shrink-0">
                             Retry
                           </button>
                         </div>
                       ) : sfxData.length === 0 ? (
-                        <p className="text-[10px] text-gray-400 py-1">No SFX generated yet.</p>
+                        <div className="text-center py-4">
+                          <p className="text-xs text-gray-400 mb-2">No sound effects yet.</p>
+                          <button
+                            onClick={handleRegen}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-[#00D4AA] text-white rounded-full hover:bg-[#00B390] transition-colors"
+                          >
+                            <Wand2 size={12} /> Generate SFX
+                          </button>
+                        </div>
                       ) : (
                         <>
                           {/* Timeline bar with draggable dots */}
-                          <div ref={timelineBarRef} className="relative w-full h-1.5 bg-gray-100 rounded-full mb-1 mt-1">
+                          <div ref={timelineBarRef} className="relative w-full h-2 bg-gray-100 rounded-full mb-1 mt-1">
                             {sfxData.map((item) => {
                               const isDragging = draggingSfxId === item.id;
                               const ts = isDragging ? dragTimestamp : item.timestamp_seconds;
@@ -874,7 +1071,7 @@ export function ClipReviewerScreen({
                                   role="slider"
                                   aria-label={`${item.label} at ${item.timestamp_seconds.toFixed(1)}s`}
                                   tabIndex={0}
-                                  className="absolute w-3.5 h-3.5 rounded-full bg-[#00D4AA] -translate-y-1 -translate-x-1/2 border-2 border-white shadow cursor-grab active:cursor-grabbing hover:scale-110 transition-transform select-none"
+                                  className="absolute w-4 h-4 rounded-full bg-[#00D4AA] -translate-y-1 -translate-x-1/2 border-2 border-white shadow-md cursor-grab active:cursor-grabbing hover:scale-125 transition-transform select-none"
                                   style={{ left: `${pct}%` }}
                                   title={`${item.label} @ ${item.timestamp_seconds.toFixed(1)}s — drag to move`}
                                   onMouseDown={(e) => { e.preventDefault(); handleDragStart(item.id, item.timestamp_seconds); }}
@@ -882,23 +1079,24 @@ export function ClipReviewerScreen({
                               );
                             })}
                           </div>
-                          <div className="flex justify-between text-[9px] text-gray-400 mb-2 px-0.5">
+                          <div className="flex justify-between text-[9px] text-gray-400 mb-3 px-0.5">
                             <span>0s</span>
                             <span>{clipDuration.toFixed(0)}s</span>
                           </div>
 
                           {/* Add SFX form */}
                           {addSfxOpen && (
-                            <div className="mb-2 p-2 bg-[#00D4AA]/5 border border-[#00D4AA]/20 rounded-lg space-y-1.5">
+                            <div className="mb-3 p-3 bg-[#00D4AA]/5 border border-[#00D4AA]/20 rounded-lg space-y-2">
+                              <label className="text-[10px] font-semibold text-gray-600 uppercase tracking-wide">Describe the sound you want</label>
                               <input
                                 type="text"
-                                placeholder="e.g. short bass hit sound effect"
+                                placeholder="e.g. dramatic orchestral hit, whoosh transition, crowd cheering..."
                                 value={newSfxPrompt}
                                 onChange={(e) => setNewSfxPrompt(e.target.value)}
-                                className="w-full border border-gray-200 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-[#00D4AA]"
+                                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-[#00D4AA]/50 focus:border-[#00D4AA]"
                               />
                               <div className="flex items-center gap-2">
-                                <label className="text-[10px] text-gray-500 shrink-0">At (s):</label>
+                                <label className="text-[10px] text-gray-500 shrink-0">Timestamp:</label>
                                 <input
                                   type="number"
                                   min={0}
@@ -906,21 +1104,22 @@ export function ClipReviewerScreen({
                                   step={0.5}
                                   value={newSfxTimestamp}
                                   onChange={(e) => setNewSfxTimestamp(Number(e.target.value))}
-                                  className="w-14 border border-gray-200 rounded px-1.5 py-0.5 text-xs"
+                                  className="w-16 border border-gray-200 rounded px-2 py-1 text-xs"
                                 />
+                                <span className="text-[10px] text-gray-400">sec</span>
                                 <div className="flex gap-1.5 ml-auto">
                                   <button
                                     onClick={() => void handleAddSfx()}
                                     disabled={addSfxLoading || !newSfxPrompt.trim()}
-                                    className="flex items-center gap-1 px-2 py-1 text-xs font-medium bg-[#00D4AA] text-white rounded hover:bg-[#00B390] disabled:opacity-50"
+                                    className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium bg-[#00D4AA] text-white rounded-lg hover:bg-[#00B390] disabled:opacity-50 transition-colors"
                                   >
-                                    {addSfxLoading ? <Loader2 size={9} className="animate-spin" /> : <Plus size={9} />}
-                                    Add
+                                    {addSfxLoading ? <Loader2 size={10} className="animate-spin" /> : <Wand2 size={10} />}
+                                    Generate
                                   </button>
                                   <button
                                     onClick={() => { setAddSfxOpen(false); setNewSfxPrompt(''); }}
                                     disabled={addSfxLoading}
-                                    className="px-2 py-1 text-xs text-gray-500 hover:text-gray-700"
+                                    className="px-3 py-1.5 text-xs text-gray-500 hover:text-gray-700 transition-colors"
                                   >
                                     Cancel
                                   </button>
@@ -930,13 +1129,16 @@ export function ClipReviewerScreen({
                           )}
 
                           {/* SFX rows */}
-                          <div className="space-y-1.5">
-                            {sfxData.map((item) => (
-                              <div key={item.id} className="flex items-center gap-1.5">
-                                <div className="w-1.5 h-1.5 rounded-full bg-[#00D4AA] shrink-0" />
-                                <div className="flex-1 min-w-0">
+                          <div className="space-y-2">
+                            {sfxData.map((item) => {
+                              const vol = typeof item.volume === 'number' ? item.volume : 1.0;
+                              const isPreviewing = previewingSfxId === item.id;
+                              return (
+                                <div key={item.id} className="bg-gray-50 rounded-lg p-2.5 hover:bg-gray-100/80 transition-colors">
                                   {editingId === item.id ? (
-                                    <div className="flex items-center gap-1">
+                                    /* Edit mode */
+                                    <div className="space-y-2">
+                                      <label className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide">Change sound prompt</label>
                                       <input
                                         autoFocus
                                         type="text"
@@ -946,44 +1148,97 @@ export function ClipReviewerScreen({
                                           if (e.key === 'Enter') void handleConfirmEdit(item.id);
                                           if (e.key === 'Escape') { setEditingId(null); setEditDraft(''); }
                                         }}
-                                        className="flex-1 min-w-0 border border-[#00D4AA] rounded px-1.5 py-0.5 text-[10px] focus:outline-none"
+                                        className="w-full border border-[#00D4AA] rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-[#00D4AA]/30"
                                         disabled={editLoading}
+                                        placeholder="Describe the new sound..."
                                       />
-                                      <button
-                                        onClick={() => void handleConfirmEdit(item.id)}
-                                        disabled={editLoading || !editDraft.trim()}
-                                        className="text-[#00D4AA] font-bold text-[10px] disabled:opacity-40"
-                                      >
-                                        {editLoading ? <Loader2 size={10} className="animate-spin" /> : '✓'}
-                                      </button>
-                                      <button onClick={() => { setEditingId(null); setEditDraft(''); }} className="text-gray-400 text-[10px]">✕</button>
+                                      <div className="flex gap-1.5 justify-end">
+                                        <button
+                                          onClick={() => void handleConfirmEdit(item.id)}
+                                          disabled={editLoading || !editDraft.trim()}
+                                          className="flex items-center gap-1 px-2.5 py-1 text-[10px] font-medium bg-[#00D4AA] text-white rounded-lg disabled:opacity-40 hover:bg-[#00B390] transition-colors"
+                                        >
+                                          {editLoading ? <Loader2 size={10} className="animate-spin" /> : <Wand2 size={10} />}
+                                          Regenerate Sound
+                                        </button>
+                                        <button
+                                          onClick={() => { setEditingId(null); setEditDraft(''); }}
+                                          className="px-2.5 py-1 text-[10px] text-gray-500 hover:text-gray-700"
+                                        >
+                                          Cancel
+                                        </button>
+                                      </div>
                                     </div>
                                   ) : (
-                                    <div className="flex items-center gap-1 min-w-0">
-                                      <span className="text-[9px] text-gray-400 shrink-0">{item.timestamp_seconds.toFixed(1)}s</span>
-                                      <span className="text-[10px] font-medium text-gray-700 truncate">{item.label}</span>
-                                    </div>
+                                    /* Display mode */
+                                    <>
+                                      <div className="flex items-center gap-2 mb-1.5">
+                                        {/* Preview button */}
+                                        <button
+                                          onClick={() => handlePreviewSfx(item)}
+                                          className={`w-6 h-6 rounded-full flex items-center justify-center shrink-0 transition-colors ${
+                                            isPreviewing ? 'bg-[#00D4AA] text-white' : 'bg-white border border-gray-200 text-gray-500 hover:border-[#00D4AA] hover:text-[#00D4AA]'
+                                          }`}
+                                          title={isPreviewing ? 'Stop preview' : 'Preview sound'}
+                                        >
+                                          {isPreviewing ? <Pause size={10} /> : <Play size={10} className="ml-0.5" />}
+                                        </button>
+                                        {/* Label & timestamp */}
+                                        <div className="flex-1 min-w-0">
+                                          <div className="flex items-center gap-1.5">
+                                            <span className="text-[11px] font-semibold text-gray-800 truncate">{item.label}</span>
+                                            <span className="text-[9px] text-gray-400 shrink-0 bg-gray-200/60 px-1.5 py-0.5 rounded">@ {item.timestamp_seconds.toFixed(1)}s</span>
+                                          </div>
+                                          <p className="text-[9px] text-gray-400 truncate mt-0.5" title={item.prompt}>{item.prompt}</p>
+                                        </div>
+                                        {/* Actions */}
+                                        <div className="flex items-center gap-1 shrink-0">
+                                          <button
+                                            onClick={() => { setEditingId(item.id); setEditDraft(item.prompt); }}
+                                            className="p-1 text-gray-400 hover:text-[#00D4AA] transition-colors rounded"
+                                            title="Change sound prompt"
+                                          >
+                                            <Pencil size={11} />
+                                          </button>
+                                          <button
+                                            onClick={() => void handleDeleteSfx(item.id)}
+                                            disabled={sfxLoading}
+                                            className="p-1 text-gray-400 hover:text-red-500 disabled:opacity-30 transition-colors rounded"
+                                            title="Remove sound"
+                                          >
+                                            <X size={11} />
+                                          </button>
+                                        </div>
+                                      </div>
+                                      {/* Volume slider */}
+                                      <div className="flex items-center gap-2 pl-8 mt-1">
+                                        <button
+                                          onClick={() => handleVolumeChange(item.id, vol > 0 ? 0 : 1)}
+                                          className="text-gray-400 hover:text-gray-600 transition-colors shrink-0"
+                                          title={vol > 0 ? 'Mute' : 'Unmute'}
+                                        >
+                                          {vol > 0 ? <Volume2 size={13} /> : <VolumeX size={13} />}
+                                        </button>
+                                        <div className="flex-1 relative flex items-center py-1">
+                                          <input
+                                            type="range"
+                                            min={0}
+                                            max={1}
+                                            step={0.01}
+                                            value={vol}
+                                            onChange={(e) => handleVolumeChange(item.id, Number(e.target.value))}
+                                            className="w-full cursor-pointer accent-[#00D4AA]"
+                                            style={{ height: '6px' }}
+                                            title={`Volume: ${Math.round(vol * 100)}%`}
+                                          />
+                                        </div>
+                                        <span className="text-[10px] font-medium text-gray-500 w-8 text-right shrink-0">{Math.round(vol * 100)}%</span>
+                                      </div>
+                                    </>
                                   )}
                                 </div>
-                                {editingId !== item.id && (
-                                  <div className="flex items-center gap-0.5 shrink-0">
-                                    <button
-                                      onClick={() => { setEditingId(item.id); setEditDraft(item.prompt); }}
-                                      className="p-0.5 text-gray-400 hover:text-gray-700 transition-colors"
-                                    >
-                                      <Pencil size={10} />
-                                    </button>
-                                    <button
-                                      onClick={() => void handleDeleteSfx(item.id)}
-                                      disabled={sfxLoading}
-                                      className="p-0.5 text-gray-400 hover:text-red-500 disabled:opacity-30 transition-colors"
-                                    >
-                                      <X size={10} />
-                                    </button>
-                                  </div>
-                                )}
-                              </div>
-                            ))}
+                              );
+                            })}
                           </div>
                         </>
                       )}

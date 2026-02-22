@@ -90,8 +90,10 @@ export default function ClipReviewerScreen() {
     }
   }, [approveMutation, rejectMutation]);
 
+  const clipVideoUrl = clip?.sfx_video_url ?? clip?.cdn_url;
+
   const handleDownload = useCallback(async () => {
-    if (!clip?.cdn_url) return;
+    if (!clipVideoUrl) return;
 
     try {
       setIsDownloading(true);
@@ -104,10 +106,10 @@ export default function ClipReviewerScreen() {
       }
 
       // Download the file
-      const filename = `clipora_clip_${clip.strategic_rank}_${Date.now()}.mp4`;
+      const filename = `clipora_clip_${clip!.strategic_rank}_${Date.now()}.mp4`;
       const localUri = `${FileSystem.documentDirectory}${filename}`;
 
-      const downloadResult = await FileSystem.downloadAsync(clip.cdn_url, localUri);
+      const downloadResult = await FileSystem.downloadAsync(clipVideoUrl, localUri);
 
       if (downloadResult.status !== 200) {
         throw new Error('Download failed');
@@ -123,7 +125,7 @@ export default function ClipReviewerScreen() {
     } finally {
       setIsDownloading(false);
     }
-  }, [clip]);
+  }, [clip, clipVideoUrl]);
 
   const navigateToClip = useCallback((clipId: string) => {
     router.replace(`/clips/${clipId}`);
@@ -223,11 +225,11 @@ export default function ClipReviewerScreen() {
           </View>
         )}
 
-        {/* Real Video Player */}
-        {clip.cdn_url ? (
+        {/* Real Video Player — prefer SFX version when present */}
+        {clipVideoUrl ? (
           <Video
             ref={videoRef}
-            source={{ uri: clip.cdn_url }}
+            source={{ uri: clipVideoUrl }}
             style={styles.videoPlayer}
             resizeMode={ResizeMode.CONTAIN}
             shouldPlay={true}

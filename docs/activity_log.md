@@ -679,3 +679,62 @@ The video processor saves clip metadata with cdn_url=NULL at creation time. The 
 - backend/api-service/src/routes/clips.js — removed 422 errors, made video mixing conditional on cdn_url presence
 
 ---
+
+## 2026-02-22 10:15 EST — Fix GoogleGenerativeAI Error and Improve Suggestions Tab
+
+### User Prompt
+"fix the [GoogleGenerativeAI Error]: Error fetching from https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:streamGenerateContent?alt=sse: [403] Method doesn't allow unregistered callers... connection error, and suggestions tabs."
+
+### Actions Taken
+1. Fixed invalid model name in PlayO Prototyping Studio UI/src/hooks/useChat.ts — changed `gemini-3-flash-preview` to `gemini-2.0-flash` (gemini-3-flash-preview does not exist and returns 403 Forbidden)
+2. Added `VITE_GEMINI_API_KEY=` placeholder to PlayO Prototyping Studio UI/.env so users know to fill it in
+3. Improved Suggestions tab in PlayO Prototyping Studio UI/src/screens/ProjectDetailScreen.tsx:
+   - Added display of `overall_feedback` from `EditGuidance` object
+   - Added `timestamp_seconds` display (formatted as MM:SS) on each suggestion card for better visual context
+
+### Files Modified
+- PlayO Prototyping Studio UI/src/hooks/useChat.ts
+- PlayO Prototyping Studio UI/.env
+- PlayO Prototyping Studio UI/src/screens/ProjectDetailScreen.tsx
+
+### Technical Details
+- Model changed from non-existent gemini-3-flash-preview to stable gemini-2.0-flash
+- Suggestions now display both overall feedback context and timestamped individual suggestions
+- Timestamp formatting: Math.floor(seconds / 60) + ':' + (seconds % 60).toString().padStart(2, '0')
+
+---
+
+## 2026-02-22 — Customizable Sound Effects Panel with Volume Control
+
+### User Prompt
+"The sound effects are working now. make them customizable and make them say something like 'recommended sound effects' - but then an option to change them by prompting or by choosing other sound tracks for the background from the web. also make the sound of them adjustable"
+
+### Actions Taken
+1. Added `volume` field to `SfxItem` type in types.ts
+2. Updated `updateSfxItem` API method to accept `{ prompt?, volume? }` instead of just prompt string
+3. Added `handleVolumeChange` function with debounced API persistence and instant local + audio element feedback
+4. Added `handlePreviewSfx` function for previewing individual SFX tracks
+5. Redesigned the SFX panel UI:
+   - "Recommended Sound Effects" header with "AI-generated" badge
+   - "Add Custom" button to add SFX by describing the sound you want
+   - "Regenerate" button to re-analyze with AI
+   - Per-SFX preview play/pause button
+   - Per-SFX volume slider with mute/unmute toggle and percentage display
+   - Edit prompt button to change and regenerate individual sounds
+   - Delete button per SFX item
+   - Better visual hierarchy with card-style rows
+6. Client-side SFX audio playback was already implemented in previous step (syncs Audio elements with video timeupdate)
+
+### Files Modified
+- PlayO Prototyping Studio UI/src/types.ts (added volume to SfxItem)
+- PlayO Prototyping Studio UI/src/lib/api.ts (updated updateSfxItem and addSfx signatures)
+- PlayO Prototyping Studio UI/src/screens/ClipReviewerScreen.tsx (major SFX panel redesign, volume control, preview, client-side audio sync)
+
+### Technical Details
+- SfxItem.volume field stores value 0.0-1.0, persisted via API and applied to HTMLAudioElement instances
+- Volume slider debounced to avoid excessive API calls during drag
+- Preview play/pause toggles per-SFX audio element independently from timeline playback
+- "Add Custom" flow accepts free-text prompt to describe a new sound effect
+- "Edit prompt" flow allows changing description of existing SFX to regenerate audio
+
+---
