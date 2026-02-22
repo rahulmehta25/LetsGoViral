@@ -618,7 +618,7 @@ export function ClipReviewerScreen({
     setDragTimestamp(currentTimestamp);
   }, []);
 
-  const handleDragMove = useCallback((e: MouseEvent) => {
+  const handleDragMove = useCallback((e: PointerEvent) => {
     if (!timelineBarRef.current || !draggingSfxId) return;
     const rect = timelineBarRef.current.getBoundingClientRect();
     const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
@@ -656,11 +656,13 @@ export function ClipReviewerScreen({
 
   useEffect(() => {
     if (!draggingSfxId) return;
-    window.addEventListener('mousemove', handleDragMove);
-    window.addEventListener('mouseup', handleDragEnd);
+    window.addEventListener('pointermove', handleDragMove);
+    window.addEventListener('pointerup', handleDragEnd);
+    window.addEventListener('pointercancel', handleDragEnd);
     return () => {
-      window.removeEventListener('mousemove', handleDragMove);
-      window.removeEventListener('mouseup', handleDragEnd);
+      window.removeEventListener('pointermove', handleDragMove);
+      window.removeEventListener('pointerup', handleDragEnd);
+      window.removeEventListener('pointercancel', handleDragEnd);
     };
   }, [draggingSfxId, handleDragMove, handleDragEnd]);
 

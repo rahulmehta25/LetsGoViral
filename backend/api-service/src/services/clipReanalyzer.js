@@ -5,9 +5,17 @@ const { logger } = require('../utils/logger');
 
 const PROJECT  = process.env.GCP_PROJECT_ID;
 const LOCATION = process.env.GCP_REGION || 'us-east1';
+const REANALYZE_TIMEOUT_MS = 120_000;
 
-const vertexAI = new VertexAI({ project: PROJECT, location: LOCATION });
-const proModel = vertexAI.getGenerativeModel({ model: 'gemini-2.5-pro' });
+let _proModel = null;
+function getProModel() {
+  if (!_proModel) {
+    if (!PROJECT) throw new Error('GCP_PROJECT_ID is not set — cannot initialise VertexAI');
+    const vertexAI = new VertexAI({ project: PROJECT, location: LOCATION });
+    _proModel = vertexAI.getGenerativeModel({ model: 'gemini-2.5-pro' });
+  }
+  return _proModel;
+}
 
 const CLIP_COUNT_FORMULA = (durationMinutes) =>
   Math.max(3, Math.min(15, Math.round(durationMinutes / 3)));
@@ -106,14 +114,17 @@ Return ONLY a valid JSON object.`;
   let clipData;
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      const result = await proModel.generateContent({
+      const result = await Promise.race([
+        getProModel().generateContent({
         contents: [{ role: 'user', parts }],
         generationConfig: {
           responseMimeType: 'application/json',
           responseSchema: schema,
           temperature: 0.3,
         },
-      });
+      }),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('Gemini re-analysis timed out')), REANALYZE_TIMEOUT_MS)),
+      ]);
 
       const text = result.response.candidates[0].content.parts[0].text;
       clipData = JSON.parse(text);
@@ -131,8 +142,8 @@ Return ONLY a valid JSON object.`;
           throw new Error(`Timestamp out of range: start=${clip.start_time_seconds} end=${clip.end_time_seconds} max=${videoDurationSeconds}`);
         }
         const duration = clip.end_time_seconds - clip.start_time_seconds;
-        if (duration < 5) {
-          throw new Error(`Clip too short: ${duration.toFixed(1)}s`);
+        if (duration < 10) {
+          throw new Error(`Clip too short: ${duration.toFixed(1)}s (minimum 10s)`);
         }
       }
 

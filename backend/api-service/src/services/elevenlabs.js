@@ -74,9 +74,9 @@ async function uploadAudioToGCS(buffer, clipId, type) {
  * @param {number} index - positional index of the SFX in the sfx_data array
  * @returns {Promise<string>} cdnUrl
  */
-async function uploadSfxToGCS(buffer, clipId, index) {
+async function uploadSfxToGCS(buffer, clipId, sfxId) {
   const storage = new Storage();
-  const destPath = `sounds/${clipId}/sfx_${index}.mp3`;
+  const destPath = `sounds/${clipId}/${sfxId}.mp3`;
 
   await storage.bucket(PROCESSED_BUCKET).file(destPath).save(buffer, {
     contentType: 'audio/mpeg',

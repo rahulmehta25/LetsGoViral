@@ -21,7 +21,9 @@ const FALLBACK_SUGGESTIONS = {
 };
 
 /**
- * Use Gemini to analyze a clip's tone and suggest ElevenLabs sound prompts.
+ * Use Gemini 2.0 Flash (fast, low-cost) for tone analysis and SFX suggestions.
+ * clipReanalyzer.js uses Gemini 2.5 Pro (slower, more expensive) for multimodal video re-analysis.
+ *
  * @param {object} clip - Clip row from DB (title, rationale, hook_score, duration_seconds)
  * @param {string} transcriptExcerpt - First 600 chars of the video transcription
  * @returns {Promise<{ tone: string, vibe: string, sfx: Array, music: Array }>}

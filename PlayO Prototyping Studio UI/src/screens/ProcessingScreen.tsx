@@ -21,6 +21,16 @@ const STATUS_STEPS: Record<string, number> = {
   FAILED: 4,
 };
 
+const STATUS_PROGRESS_RANGE: Record<string, [number, number]> = {
+  PENDING: [5, 15],
+  UPLOADED: [15, 25],
+  PROCESSING: [25, 50],
+  TRANSCRIBING: [50, 70],
+  ANALYZING: [70, 90],
+  COMPLETED: [100, 100],
+  FAILED: [0, 0],
+};
+
 export function ProcessingScreen({
   onNavigate,
   videoId,
@@ -52,7 +62,11 @@ export function ProcessingScreen({
           return;
         }
 
-        setProgress((prev) => Math.min(prev + 7, 95));
+        const [rangeMin, rangeMax] = STATUS_PROGRESS_RANGE[video.processing_status] || [5, 95];
+        setProgress((prev) => {
+          if (prev < rangeMin) return rangeMin;
+          return Math.min(prev + 3, rangeMax);
+        });
       } catch (error) {
         clearInterval(timer);
         onError(error instanceof Error ? error.message : 'Failed to poll processing status');

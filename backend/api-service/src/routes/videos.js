@@ -152,11 +152,14 @@ router.post('/:id/finalize-clips', async (req, res) => {
   }
 
   const { rows: videoRows } = await db.query(
-    'SELECT id, project_id, upload_path FROM videos WHERE id = $1',
+    'SELECT id, project_id, upload_path, processing_status FROM videos WHERE id = $1',
     [req.params.id]
   );
   const video = videoRows[0];
   if (!video) return res.status(404).json({ error: 'Video not found' });
+  if (video.processing_status === 'CLIPPING' || video.processing_status === 'REANALYZING') {
+    return res.status(409).json({ error: 'Video is already being processed — please wait' });
+  }
 
   await db.query(
     'UPDATE videos SET processing_status = $1, updated_at = now() WHERE id = $2',
@@ -164,6 +167,7 @@ router.post('/:id/finalize-clips', async (req, res) => {
   );
 
   const sourcePath = path.join(TMP_DIR, `src_${video.id}.mp4`);
+  try {
   await storage.downloadUploadedVideo(video.upload_path, sourcePath);
 
   const { rows: existingClipRows } = await db.query(
@@ -219,8 +223,9 @@ router.post('/:id/finalize-clips', async (req, res) => {
     results.push({ id: clipId, cdn_url: cdnUrl, start_time_seconds: start, end_time_seconds: end, duration_seconds: duration });
     fs.unlink(localPath, () => {});
   }
-
-  fs.unlink(sourcePath, () => {});
+  } finally {
+    fs.unlink(sourcePath, () => {});
+  }
   await db.query(
     'UPDATE videos SET processing_status = $1, updated_at = now() WHERE id = $2',
     ['COMPLETED', video.id]
@@ -239,11 +244,14 @@ router.post('/:id/reanalyze-clips', async (req, res) => {
   }
 
   const { rows: videoRows } = await db.query(
-    'SELECT id, project_id, original_filename, upload_path, transcription, duration_seconds FROM videos WHERE id = $1',
+    'SELECT id, project_id, original_filename, upload_path, transcription, duration_seconds, processing_status FROM videos WHERE id = $1',
     [req.params.id]
   );
   const video = videoRows[0];
   if (!video) return res.status(404).json({ error: 'Video not found' });
+  if (video.processing_status === 'CLIPPING' || video.processing_status === 'REANALYZING') {
+    return res.status(409).json({ error: 'Video is already being processed — please wait' });
+  }
   if (!video.transcription) {
     return res.status(400).json({ error: 'Video has no transcription — cannot re-analyze' });
   }
@@ -264,21 +272,37 @@ router.post('/:id/reanalyze-clips', async (req, res) => {
   });
   const gcsUri = `gs://${resolved.bucketName}/${resolved.objectPath}`;
 
-  const newClips = await reanalyzeClips({
-    gcsUri,
-    transcription: video.transcription,
-    videoDurationSeconds: Number(video.duration_seconds),
-    currentClips,
-    userSuggestion: suggestion.trim(),
-  });
+  await db.query(
+    'UPDATE videos SET processing_status = $1, updated_at = now() WHERE id = $2',
+    ['REANALYZING', video.id]
+  );
+
+  let newClips;
+  try {
+    newClips = await reanalyzeClips({
+      gcsUri,
+      transcription: video.transcription,
+      videoDurationSeconds: Number(video.duration_seconds),
+      currentClips,
+      userSuggestion: suggestion.trim(),
+    });
+  } catch (reanalyzeErr) {
+    await db.query(
+      'UPDATE videos SET processing_status = $1, updated_at = now() WHERE id = $2',
+      ['COMPLETED', video.id]
+    );
+    throw reanalyzeErr;
+  }
 
   // Transactional clip replacement
   const client = await db.getClient();
   try {
     await client.query('BEGIN');
 
-    // Delete old clips
-    await client.query('DELETE FROM clips WHERE video_id = $1', [video.id]);
+    await client.query(
+      `UPDATE clips SET archived = TRUE, updated_at = now() WHERE video_id = $1 AND (archived IS NULL OR archived = FALSE)`,
+      [video.id]
+    );
 
     // Insert new clips
     const usedSlugs = new Set();
@@ -323,6 +347,10 @@ router.post('/:id/reanalyze-clips', async (req, res) => {
       });
     }
 
+    await client.query(
+      'UPDATE videos SET processing_status = $1, updated_at = now() WHERE id = $2',
+      ['COMPLETED', video.id]
+    );
     await client.query('COMMIT');
     logger.info(`Re-analyzed ${insertedClips.length} clips for video ${video.id}`);
     res.json({ data: { video_id: video.id, clips: insertedClips } });
