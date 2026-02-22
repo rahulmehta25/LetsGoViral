@@ -46,6 +46,17 @@ app.use((err, _req, res, _next) => {
   res.status(status).json({ error: err.message || 'Internal server error' });
 });
 
+// ─── DB Migrations (idempotent) ──────────────────────────────────────────
+const db = require('./db');
+(async () => {
+  try {
+    await db.query(`ALTER TABLE clips ADD COLUMN IF NOT EXISTS music_data JSONB DEFAULT NULL`);
+    logger.info('DB migration: music_data column ensured');
+  } catch (err) {
+    logger.warn(`DB migration skipped: ${err.message}`);
+  }
+})();
+
 // ─── Start Server ─────────────────────────────────────────────────────────
 app.listen(PORT, () => {
   logger.info(`Clipora API listening on port ${PORT}`);

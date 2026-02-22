@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, Play, Pause, Wand2, RefreshCw, Loader2, Pencil, Plus, X, Volume2, VolumeX, Sparkles, SendHorizonal } from 'lucide-react';
+import { ArrowLeft, Play, Pause, Wand2, RefreshCw, Loader2, Pencil, Plus, X, Volume2, VolumeX, Sparkles, SendHorizonal, Music, Check } from 'lucide-react';
+import { MUSIC_TRACKS } from '../data/musicTracks';
 import { Clip, VideoDetails, SfxItem } from '../types';
 import { webApi } from '../lib/api';
 
@@ -85,6 +86,15 @@ export function ClipReviewerScreen({
   const [newSfxTimestamp, setNewSfxTimestamp] = useState(0);
   const [addSfxLoading, setAddSfxLoading] = useState(false);
 
+  // ── Background Music state (per-clip, keyed by clip ID) ──
+  const [selectedMusic, setSelectedMusic] = useState<Record<string, string | null>>({});
+  const [musicVolume, setMusicVolume] = useState<Record<string, number>>({});
+  const musicVolumeRef = useRef(musicVolume);
+  musicVolumeRef.current = musicVolume;
+  const musicAudioRef = useRef<HTMLAudioElement | null>(null);
+  const [previewingMusicId, setPreviewingMusicId] = useState<string | null>(null);
+  const previewMusicAudioRef = useRef<HTMLAudioElement | null>(null);
+
   // ── Map startIndex (rank-based) → chronological index ──
   useEffect(() => {
     if (!video?.clips || video.clips.length === 0) return;
@@ -113,6 +123,24 @@ export function ClipReviewerScreen({
       return { ...clip, start, end };
     });
     setEditableClips(seeded);
+
+    // Initialize music state from saved music_data
+    const musicInit: Record<string, string | null> = {};
+    const volInit: Record<string, number> = {};
+    for (const clip of chronoClips) {
+      if (clip.music_data) {
+        musicInit[clip.id] = clip.music_data.track_id;
+        volInit[clip.id] = clip.music_data.volume ?? 0.5;
+      }
+    }
+    if (Object.keys(musicInit).length > 0) {
+      setSelectedMusic((prev) => ({ ...prev, ...musicInit }));
+      setMusicVolume((prev) => {
+        const next = { ...prev, ...volInit };
+        musicVolumeRef.current = next;
+        return next;
+      });
+    }
   }, [chronoClips]);
 
   const timelineDuration = useMemo(() => {
@@ -162,6 +190,9 @@ export function ClipReviewerScreen({
     // Stop any SFX preview
     if (previewAudioRef.current) { previewAudioRef.current.pause(); previewAudioRef.current = null; }
     setPreviewingSfxId(null);
+    // Stop any music preview
+    if (previewMusicAudioRef.current) { previewMusicAudioRef.current.pause(); previewMusicAudioRef.current = null; }
+    setPreviewingMusicId(null);
   }, [activeIndex]);
 
   // ── Auto-generate SFX when active clip loads (if not already generated) ──
@@ -343,6 +374,84 @@ export function ClipReviewerScreen({
       v.removeEventListener('seeked', onSeeked);
     };
   }, [activeIndex, editableClips]);
+
+  // ── Client-side background music playback ──
+  useEffect(() => {
+    const v = videoRef.current;
+    const clip = editableClips[activeIndex];
+    if (!clip) return;
+
+    const trackId = selectedMusic[clip.id];
+    const track = trackId ? MUSIC_TRACKS.find((t) => t.id === trackId) : null;
+
+    // No track selected — clean up any existing music audio
+    if (!track) {
+      if (musicAudioRef.current) {
+        musicAudioRef.current.pause();
+        musicAudioRef.current.src = '';
+        musicAudioRef.current = null;
+      }
+      return;
+    }
+
+    // Create or update music audio element
+    let audio = musicAudioRef.current;
+    if (!audio || audio.getAttribute('data-track-id') !== track.id) {
+      if (audio) { audio.pause(); audio.src = ''; }
+      audio = new Audio(track.src);
+      audio.loop = true;
+      audio.preload = 'auto';
+      audio.setAttribute('data-track-id', track.id);
+      musicAudioRef.current = audio;
+    }
+    audio.volume = musicVolumeRef.current[clip.id] ?? 0.5;
+
+    if (!v) return;
+
+    const clipStart = clip.start;
+    const clipEnd = clip.end;
+    const clipId = clip.id;
+
+    const syncMusic = () => {
+      const ma = musicAudioRef.current;
+      if (!ma) return;
+      const videoTime = v.currentTime;
+      ma.volume = musicVolumeRef.current[clipId] ?? 0.5;
+      if (videoTime >= clipStart && videoTime < clipEnd && !v.paused) {
+        if (ma.paused) ma.play().catch(() => {});
+      } else {
+        if (!ma.paused) ma.pause();
+      }
+    };
+
+    const onPause = () => {
+      musicAudioRef.current?.pause();
+    };
+
+    const onSeeked = () => {
+      if (musicAudioRef.current) {
+        musicAudioRef.current.currentTime = 0;
+      }
+    };
+
+    v.addEventListener('timeupdate', syncMusic);
+    v.addEventListener('play', syncMusic);
+    v.addEventListener('pause', onPause);
+    v.addEventListener('seeked', onSeeked);
+
+    // If video is already playing when track is selected, start immediately
+    if (!v.paused) syncMusic();
+
+    return () => {
+      v.removeEventListener('timeupdate', syncMusic);
+      v.removeEventListener('play', syncMusic);
+      v.removeEventListener('pause', onPause);
+      v.removeEventListener('seeked', onSeeked);
+      if (musicAudioRef.current) {
+        musicAudioRef.current.pause();
+      }
+    };
+  }, [activeIndex, editableClips, selectedMusic]);
 
   // ── Segment edge dragging ──
   const beginHandleDrag = (e: React.PointerEvent, clipIdx: number, edge: 'start' | 'end') => {
@@ -622,6 +731,71 @@ export function ClipReviewerScreen({
     audio.play().catch(() => {});
     previewAudioRef.current = audio;
     setPreviewingSfxId(sfx.id);
+  };
+
+  // Preview a background music track
+  const handlePreviewMusic = (trackId: string) => {
+    if (previewMusicAudioRef.current) {
+      previewMusicAudioRef.current.pause();
+      previewMusicAudioRef.current = null;
+    }
+    if (previewingMusicId === trackId) {
+      setPreviewingMusicId(null);
+      return;
+    }
+    const track = MUSIC_TRACKS.find((t) => t.id === trackId);
+    if (!track) return;
+    const audio = new Audio(track.src);
+    audio.volume = 0.5;
+    audio.onended = () => { setPreviewingMusicId(null); previewMusicAudioRef.current = null; };
+    audio.play().catch(() => {});
+    previewMusicAudioRef.current = audio;
+    setPreviewingMusicId(trackId);
+  };
+
+  // Select / deselect a background music track for the active clip
+  const musicVolumeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const persistMusic = (clipId: string, trackId: string | null, vol: number) => {
+    if (!trackId) {
+      webApi.clips.setMusic(clipId, null).catch(() => {});
+      return;
+    }
+    const track = MUSIC_TRACKS.find((t) => t.id === trackId);
+    if (!track) return;
+    const trackUrl = `${window.location.origin}${track.src}`;
+    webApi.clips.setMusic(clipId, { track_id: trackId, track_url: trackUrl, volume: vol }).catch(() => {});
+  };
+
+  const handleSelectMusic = (clipId: string, trackId: string) => {
+    const isDeselect = selectedMusic[clipId] === trackId;
+    setSelectedMusic((prev) => ({
+      ...prev,
+      [clipId]: isDeselect ? null : trackId,
+    }));
+    const vol = musicVolume[clipId] ?? 0.5;
+    persistMusic(clipId, isDeselect ? null : trackId, vol);
+  };
+
+  const handleRemoveMusic = (clipId: string) => {
+    setSelectedMusic((prev) => ({ ...prev, [clipId]: null }));
+    persistMusic(clipId, null, 0);
+  };
+
+  const handleMusicVolumeChange = (clipId: string, newVol: number) => {
+    setMusicVolume((prev) => {
+      const next = { ...prev, [clipId]: newVol };
+      musicVolumeRef.current = next;
+      return next;
+    });
+    if (musicAudioRef.current) musicAudioRef.current.volume = newVol;
+
+    // Debounce API call for volume changes
+    if (musicVolumeTimerRef.current) clearTimeout(musicVolumeTimerRef.current);
+    musicVolumeTimerRef.current = setTimeout(() => {
+      const trackId = selectedMusic[clipId];
+      if (trackId) persistMusic(clipId, trackId, newVol);
+    }, 500);
   };
 
   const handleDragStart = useCallback((sfxId: string, currentTimestamp: number) => {
@@ -1262,6 +1436,95 @@ export function ClipReviewerScreen({
                           </div>
                         </>
                       )}
+                    </div>
+
+                    {/* ── Background Music Section ── */}
+                    <div className="border-t border-gray-100">
+                      <div className="flex items-center justify-between px-4 py-2.5 bg-gradient-to-r from-gray-50 to-white">
+                        <div className="flex items-center gap-1.5 font-semibold text-gray-800 text-xs">
+                          <Music size={13} className="text-[#00D4AA]" />
+                          Background Music
+                        </div>
+                        {selectedMusic[clip.id] && (
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => {
+                                const mv = musicVolume[clip.id] ?? 0.5;
+                                handleMusicVolumeChange(clip.id, mv > 0 ? 0 : 0.5);
+                              }}
+                              className="text-gray-400 hover:text-gray-600 transition-colors shrink-0"
+                              title={(musicVolume[clip.id] ?? 0.5) > 0 ? 'Mute' : 'Unmute'}
+                            >
+                              {(musicVolume[clip.id] ?? 0.5) > 0 ? <Volume2 size={13} /> : <VolumeX size={13} />}
+                            </button>
+                            <input
+                              type="range"
+                              min={0}
+                              max={1}
+                              step={0.01}
+                              value={musicVolume[clip.id] ?? 0.5}
+                              onChange={(e) => handleMusicVolumeChange(clip.id, Number(e.target.value))}
+                              className="w-20 cursor-pointer accent-[#00D4AA]"
+                              style={{ height: '6px' }}
+                              title={`Volume: ${Math.round((musicVolume[clip.id] ?? 0.5) * 100)}%`}
+                            />
+                            <span className="text-[10px] font-medium text-gray-500 w-8 text-right shrink-0">
+                              {Math.round((musicVolume[clip.id] ?? 0.5) * 100)}%
+                            </span>
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="px-4 py-3">
+                        <div className="grid grid-cols-2 gap-1.5">
+                          {MUSIC_TRACKS.map((track) => {
+                            const isSelected = selectedMusic[clip.id] === track.id;
+                            const isPreviewing = previewingMusicId === track.id;
+                            return (
+                              <div
+                                key={track.id}
+                                className={`flex items-center gap-2 rounded-lg px-2.5 py-2 cursor-pointer transition-colors ${
+                                  isSelected
+                                    ? 'bg-[#00D4AA]/10 border border-[#00D4AA]/40'
+                                    : 'bg-gray-50 border border-transparent hover:bg-gray-100'
+                                }`}
+                                onClick={() => handleSelectMusic(clip.id, track.id)}
+                              >
+                                <div
+                                  className={`w-4 h-4 rounded-full flex items-center justify-center shrink-0 ${
+                                    isSelected
+                                      ? 'bg-[#00D4AA] text-white'
+                                      : 'border border-gray-300'
+                                  }`}
+                                >
+                                  {isSelected && <Check size={10} />}
+                                </div>
+                                <span className={`text-[11px] truncate flex-1 ${isSelected ? 'font-semibold text-gray-800' : 'text-gray-600'}`}>
+                                  {track.name}
+                                </span>
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); handlePreviewMusic(track.id); }}
+                                  className={`w-5 h-5 rounded-full flex items-center justify-center shrink-0 transition-colors ${
+                                    isPreviewing ? 'bg-[#00D4AA] text-white' : 'text-gray-400 hover:text-[#00D4AA]'
+                                  }`}
+                                  title={isPreviewing ? 'Stop preview' : 'Preview'}
+                                >
+                                  {isPreviewing ? <Pause size={9} /> : <Play size={9} className="ml-px" />}
+                                </button>
+                              </div>
+                            );
+                          })}
+                        </div>
+
+                        {selectedMusic[clip.id] && (
+                          <button
+                            onClick={() => handleRemoveMusic(clip.id)}
+                            className="mt-2 flex items-center gap-1 px-3 py-1.5 text-[10px] font-medium text-gray-500 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                          >
+                            <X size={10} /> Remove Music
+                          </button>
+                        )}
+                      </div>
                     </div>
                   </div>
                 )}

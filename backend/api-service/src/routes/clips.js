@@ -156,7 +156,7 @@ router.post('/:id/generate-sfx', async (req, res) => {
   let sfxVideoUrl = null;
   if (clip.cdn_url) {
     try {
-      const videoBuffer = await mixSfxOntoVideo(clip.cdn_url, sfxItems);
+      const videoBuffer = await mixSfxOntoVideo(clip.cdn_url, sfxItems, clip.music_data || null);
       sfxVideoUrl = await uploadMixedVideoToGCS(videoBuffer, clipId);
     } catch (mixErr) {
       // Video file may not exist — skip mixing, SFX audio is still saved
@@ -185,8 +185,8 @@ router.delete('/:id/sfx/:sfx_id', async (req, res) => {
 
   let sfxVideoUrl = null;
 
-  if (remaining.length > 0 && clip.cdn_url) {
-    const videoBuffer = await mixSfxOntoVideo(clip.cdn_url, remaining);
+  if ((remaining.length > 0 || clip.music_data) && clip.cdn_url) {
+    const videoBuffer = await mixSfxOntoVideo(clip.cdn_url, remaining, clip.music_data || null);
     sfxVideoUrl = await uploadMixedVideoToGCS(videoBuffer, clip.id);
   }
 
@@ -236,7 +236,7 @@ router.put('/:id/sfx/:sfx_id', async (req, res) => {
 
   let sfxVideoUrl = clip.sfx_video_url || null;
   if (clip.cdn_url) {
-    const videoBuffer = await mixSfxOntoVideo(clip.cdn_url, updatedSfx);
+    const videoBuffer = await mixSfxOntoVideo(clip.cdn_url, updatedSfx, clip.music_data || null);
     sfxVideoUrl = await uploadMixedVideoToGCS(videoBuffer, clip.id);
   }
 
@@ -270,7 +270,7 @@ router.patch('/:id/sfx/:sfx_id', async (req, res) => {
 
   let sfxVideoUrl = clip.sfx_video_url || null;
   if (clip.cdn_url) {
-    const videoBuffer = await mixSfxOntoVideo(clip.cdn_url, updatedSfx);
+    const videoBuffer = await mixSfxOntoVideo(clip.cdn_url, updatedSfx, clip.music_data || null);
     sfxVideoUrl = await uploadMixedVideoToGCS(videoBuffer, clip.id);
   }
 
@@ -318,13 +318,51 @@ router.post('/:id/sfx', async (req, res) => {
 
   let sfxVideoUrl = null;
   if (clip.cdn_url) {
-    const videoBuffer = await mixSfxOntoVideo(clip.cdn_url, updatedSfx);
+    const videoBuffer = await mixSfxOntoVideo(clip.cdn_url, updatedSfx, clip.music_data || null);
     sfxVideoUrl = await uploadMixedVideoToGCS(videoBuffer, clip.id);
   }
 
   const { rows: updated } = await db.query(
     `UPDATE clips SET sfx_data = $1, sfx_video_url = $2 WHERE id = $3 RETURNING *`,
     [JSON.stringify(updatedSfx), sfxVideoUrl, clip.id]
+  );
+
+  res.json({ data: { clip: updated[0] } });
+});
+
+// PUT /api/clips/:id/music — set or remove background music for a clip, then re-mix
+router.put('/:id/music', async (req, res) => {
+  const { mixSfxOntoVideo, uploadMixedVideoToGCS } = require('../services/sfxMixer');
+
+  const { track_id, track_url, volume } = req.body;
+
+  const { rows } = await db.query('SELECT * FROM clips WHERE id = $1', [req.params.id]);
+  if (!rows[0]) return res.status(404).json({ error: 'Clip not found' });
+
+  const clip = rows[0];
+
+  // Build music_data (null to remove)
+  const musicData = track_id && track_url
+    ? { track_id, track_url, volume: typeof volume === 'number' ? Math.max(0, Math.min(1, volume)) : 0.5 }
+    : null;
+
+  // Re-mix if clip has a CDN URL
+  let sfxVideoUrl = clip.sfx_video_url || null;
+  const currentSfx = Array.isArray(clip.sfx_data) ? clip.sfx_data : [];
+  if (clip.cdn_url && (currentSfx.length > 0 || musicData)) {
+    try {
+      const videoBuffer = await mixSfxOntoVideo(clip.cdn_url, currentSfx, musicData);
+      sfxVideoUrl = await uploadMixedVideoToGCS(videoBuffer, clip.id);
+    } catch (mixErr) {
+      // Skip mixing if video not accessible
+    }
+  } else if (!musicData && currentSfx.length === 0) {
+    sfxVideoUrl = null;
+  }
+
+  const { rows: updated } = await db.query(
+    `UPDATE clips SET music_data = $1, sfx_video_url = $2 WHERE id = $3 RETURNING *`,
+    [musicData ? JSON.stringify(musicData) : null, sfxVideoUrl, clip.id]
   );
 
   res.json({ data: { clip: updated[0] } });

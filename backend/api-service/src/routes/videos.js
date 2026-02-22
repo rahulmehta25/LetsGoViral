@@ -144,8 +144,10 @@ router.get('/:id/clips', async (req, res) => {
 });
 
 // POST /api/videos/:id/finalize-clips
-// Re-cut and upload clips after timeline edits.
+// Re-cut and upload clips after timeline edits, then mix SFX + music if present.
 router.post('/:id/finalize-clips', async (req, res) => {
+  const { mixSfxOntoVideo, uploadMixedVideoToGCS } = require('../services/sfxMixer');
+
   const { clips } = req.body;
   if (!Array.isArray(clips) || clips.length === 0) {
     return res.status(400).json({ error: 'clips array is required' });
@@ -167,7 +169,7 @@ router.post('/:id/finalize-clips', async (req, res) => {
   await storage.downloadUploadedVideo(video.upload_path, sourcePath);
 
   const { rows: existingClipRows } = await db.query(
-    'SELECT id, title FROM clips WHERE video_id = $1',
+    'SELECT id, title, sfx_data, music_data FROM clips WHERE video_id = $1',
     [video.id]
   );
   const existing = new Map(existingClipRows.map((item) => [item.id, item]));
@@ -204,6 +206,21 @@ router.post('/:id/finalize-clips', async (req, res) => {
 
     const cdnUrl = storage.buildCdnUrl(destPath);
 
+    // Mix SFX + background music onto the cut clip (if any exist)
+    const clipRow = existing.get(clipId);
+    const sfxData = Array.isArray(clipRow?.sfx_data) ? clipRow.sfx_data : [];
+    const musicData = clipRow?.music_data || null;
+    let sfxVideoUrl = null;
+
+    if (sfxData.length > 0 || musicData) {
+      try {
+        const videoBuffer = await mixSfxOntoVideo(cdnUrl, sfxData, musicData);
+        sfxVideoUrl = await uploadMixedVideoToGCS(videoBuffer, clipId);
+      } catch (mixErr) {
+        logger.warn(`SFX/music mix failed for clip ${clipId}: ${mixErr.message}`);
+      }
+    }
+
     await db.query(
       `UPDATE clips
        SET processed_path = $1,
@@ -211,12 +228,13 @@ router.post('/:id/finalize-clips', async (req, res) => {
            start_time_seconds = $3,
            end_time_seconds = $4,
            duration_seconds = $5,
-           user_approved = TRUE
-       WHERE id = $6 AND video_id = $7`,
-      [destPath, cdnUrl, start, end, duration, clipId, video.id]
+           user_approved = TRUE,
+           sfx_video_url = $6
+       WHERE id = $7 AND video_id = $8`,
+      [destPath, cdnUrl, start, end, duration, sfxVideoUrl, clipId, video.id]
     );
 
-    results.push({ id: clipId, cdn_url: cdnUrl, start_time_seconds: start, end_time_seconds: end, duration_seconds: duration });
+    results.push({ id: clipId, cdn_url: cdnUrl, sfx_video_url: sfxVideoUrl, start_time_seconds: start, end_time_seconds: end, duration_seconds: duration });
     fs.unlink(localPath, () => {});
   }
 
