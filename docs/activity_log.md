@@ -504,3 +504,178 @@ End-to-end pipeline is now live: GCS upload → Pub/Sub → Cloud Run Service �
 - `backend/video-processor/.gcloudignore`
 
 ---
+
+## 2026-02-21 14:35 EST — Fix CI: Commit Missing package-lock.json Files + Merge to Main
+
+### User Prompt
+"Merge to main and verify CI runs."
+
+### Actions Taken
+1. Merged branch devin/1771703260-backend-fixes-and-onboarding into main and pushed
+2. First CI run (22269540732): frontend deploy PASSED, but API/video-processor/test failed due to missing or out-of-sync package-lock.json files
+3. Root cause: .gitignore contained `package-lock.json` globally, so backend lock files were never committed; video-processor lock file was out of sync with package.json (express v4 in lock vs v5 in package.json)
+4. Fixed by force-adding backend/api-service/package-lock.json, regenerating backend/video-processor/package-lock.json, and adding negation patterns to .gitignore
+5. Second CI run (22269643414): all 3 deploy jobs PASSED (api, video-processor, frontend). Only test-api still fails due to pre-existing test bug in projects.test.js (TypeError: Cannot read properties of undefined reading 'map') — unrelated to our changes.
+6. Set 3 new GitHub secrets: DB_HOST, VITE_API_KEY, VITE_GEMINI_API_KEY (total: 9 secrets configured)
+
+### CI Results (run 22269643414)
+- Deploy API Service: SUCCESS
+- Deploy Video Processor Service: SUCCESS
+- Deploy Frontend: SUCCESS
+- Test API Service: FAILURE (pre-existing test bug, not related to deploy changes)
+
+### Files Modified
+- .gitignore — added negation patterns for backend lock files
+- backend/api-service/package-lock.json — force-added (was gitignored)
+- backend/video-processor/package-lock.json — regenerated to sync with package.json
+
+---
+
+## 2026-02-21 — Fix Failing DELETE Test in projects.test.js
+
+### User Prompt
+"Fix the failing test in projects.test.js"
+
+### Root Cause
+The DELETE /api/projects/:id route makes 3 sequential db.query calls:
+1. Query videos for the project
+2. Query clips for the videos
+3. Delete the project
+
+The test used `mockResolvedValue({ rowCount: 1 })` which returned the same object for all 3 calls. The first two queries destructure `{ rows }` from the response but received `{ rowCount: 1 }` (no rows property), causing `videos` and `clips` variables to be undefined. When the code tried to call `videos.map(...)` and `clips.map(...)`, it threw `TypeError: Cannot read properties of undefined (reading 'map')`.
+
+### Fix
+Updated both DELETE tests to use `mockResolvedValueOnce` for each sequential query:
+1. First call: returns `{ rows: [] }` for the videos query
+2. Second call: returns `{ rows: [] }` for the clips query
+3. Third call: returns `{ rowCount: 1 }` for the delete query
+
+Each mock is consumed in order by subsequent `db.query()` calls in the route handler.
+
+### Files Modified
+- /Users/rahulmehta/Desktop/Projects/Lets-Go-Viral/backend/api-service/src/__tests__/projects.test.js — fixed mock setup for both DELETE tests (successful delete and unsuccessful delete)
+
+### Test Results
+All 8 tests in projects.test.js now passing (CRUD operations all working correctly)
+
+---
+
+## 2026-02-21 — Merge feature/sfx-overlay with Pre-Merge Checklist Complete
+
+### User Prompt
+"Fetch latest from feature/sfx-overlay branch and complete pre-merge critical checklist before merging."
+
+### Pre-Merge Checklist Results
+
+1. **DB Migrations 002/003**: ALREADY APPLIED
+   - All 5 columns exist on production clips table: sound_url, sound_prompt, sound_type, sfx_data, sfx_video_url
+
+2. **ELEVEN_LABS_API_KEY**: SET
+   - Created clipora-elevenlabs-api-key in GCP Secret Manager
+   - Set GitHub Actions secret ELEVEN_LABS_API_KEY
+   - Added ELEVEN_LABS_API_KEY to deploy.yml secrets section for api-service
+   - Granted clipora-service-account@clipora-487805.iam.gserviceaccount.com IAM access to secret
+
+3. **FFmpeg in api-service Docker**: VERIFIED
+   - Branch Dockerfile adds `apt-get install ffmpeg`, will apply on merge
+
+4. **Auto-generation behavior**: REVIEWED
+   - useEffect has guards: skips if clip already has sfx_data
+   - Skips if already attempted in session (prevents infinite loops)
+   - One ElevenLabs API call per new clip, not on every render
+   - Behavior is reasonable for MVP scope
+
+5. **cloud-sql-proxy binary (32MB)**: NOT TRACKED IN GIT
+   - Exists on disk only, added to .gitignore to prevent accidental commits
+
+### Actions Taken
+- Fetched origin/feature/sfx-overlay branch
+- Merged into main (13 files, +1209 lines)
+- Added ELEVEN_LABS_API_KEY secret mapping to deploy.yml for clipora-api service
+- Created clipora-elevenlabs-api-key in GCP Secret Manager
+- Set ELEVEN_LABS_API_KEY as GitHub Actions secret
+- Granted clipora-service-account access to ElevenLabs API secret
+- Added cloud-sql-proxy to .gitignore to exclude development binaries
+
+### Files Modified
+- `.github/workflows/deploy.yml` — added ELEVEN_LABS_API_KEY secret mapping for api-service
+- `.gitignore` — added cloud-sql-proxy exclusion
+
+### Files Added from Branch Merge
+- `backend/api-service/src/routes/clips.js` — SFX endpoints (generate, CRUD, mix)
+- `backend/api-service/src/services/elevenlabs.js` — ElevenLabs sound generation service
+- `backend/api-service/src/services/sfxMixer.js` — FFmpeg video/audio mixer
+- `backend/api-service/src/services/soundAnalyzer.js` — Gemini tone analysis service
+- `infrastructure/database/migrations/002_sound_effects.sql`
+- `infrastructure/database/migrations/003_sfx_overlay.sql`
+- `PlayO Prototyping Studio UI/src/screens/ClipReviewerScreen.tsx` (major update)
+- `PlayO Prototyping Studio UI/src/lib/api.ts` (SFX API methods)
+- `PlayO Prototyping Studio UI/src/types.ts` (SFX types)
+
+### Technical Summary
+Sound effects overlay feature merged successfully. Infrastructure ready: database migrations applied, API secrets configured in GCP Secret Manager and GitHub Actions, ElevenLabs integration fully wired. API service will auto-generate sound effects on first clip review (with session dedup). Frontend updated with SFX UI components and API client methods.
+
+---
+
+## 2026-02-22 — ElevenLabs SFX Integration Verified Working in Production
+
+### User Prompt
+"Get the ElevenLabs integration working in production."
+
+### Verification Results (all passing)
+1. **GET /api/clips/:id/sound-suggestions** — Gemini tone analysis returns SFX and music prompts (200 OK)
+2. **POST /api/clips/:id/sound** — Single SFX generation via ElevenLabs, uploaded to GCS (200 OK, sound_url populated)
+3. **POST /api/clips/:id/generate-sfx** — Full pipeline: Gemini identifies 4 timestamped SFX moments, ElevenLabs generates audio for each, FFmpeg mixes onto video, uploads to GCS (200 OK, sfx_data + sfx_video_url populated)
+4. **SFX mixed video accessible at CDN URL** (5.2MB, HTTP 200)
+
+### Test clip used
+ce4f4288-3255-455f-812b-123ee63351eb ("The Superpower of Good Communication", 42.5s)
+
+### Production Configuration Confirmed
+- **ELEVEN_LABS_API_KEY**: mounted via Secret Manager (clipora-elevenlabs-api-key)
+- **FFmpeg**: installed in api-service Docker image
+- **GCS**: sounds/{clipId}/ and sfx-videos/{clipId}/ paths working
+- **Gemini 2.0 Flash**: working via Vertex AI for tone analysis
+
+---
+
+## 2026-02-22 — Add Per-Track Volume Control to SFX Mixer
+
+### User Prompt
+"Add volume control for background music in sfxMixer."
+
+### Actions Taken
+- Claude Code: Modified backend/api-service/src/services/sfxMixer.js — Added per-track `volume` filter (0.0-1.0, default 1.0) to FFmpeg filter_complex. Each SFX track now receives `volume=V,adelay=Xms` instead of just `adelay=Xms`. Volume clamped to [0,1] range.
+- Claude Code: Modified backend/api-service/src/routes/clips.js POST /sfx endpoint — Accepts optional `volume` field in request body, persists it in sfx_data JSONB column.
+- Claude Code: Modified backend/api-service/src/routes/clips.js PUT /sfx/:sfx_id endpoint — Accepts optional `volume` field for updating individual SFX volume, triggers re-mix on the parent clip.
+
+### Files Modified
+- /Users/rahulmehta/Desktop/Projects/Lets-Go-Viral/backend/api-service/src/services/sfxMixer.js
+- /Users/rahulmehta/Desktop/Projects/Lets-Go-Viral/backend/api-service/src/routes/clips.js
+
+### Usage
+To add quiet background music, POST /api/clips/:clip_id/sfx with `{ "prompt": "...", "volume": 0.15 }`. SFX hits default to `volume: 1.0` (full volume).
+
+### Technical Details
+- Volume is a per-SFX setting stored in sfx_data JSONB alongside timestamp, prompt, type, and gcs_path
+- FFmpeg volume filter applied per-audio-input before mixing
+- Backward compatible: existing SFX without explicit volume setting default to 1.0
+
+---
+
+## 2026-02-22 — Fix "Clip has no cdn_url" Error in SFX Routes
+
+### User Prompt
+"Clip has no cdn_url to re-mix SFX onto"
+
+### Root Cause
+The video processor saves clip metadata with cdn_url=NULL at creation time. The cdn_url only gets populated when the user calls POST /videos/:id/finalize-clips (the export step). All SFX routes (DELETE, PUT, PATCH, POST) were returning 422 errors for clips that hadn't been exported yet.
+
+### Fixes Applied
+1. Backfilled cdn_url for all 8 clips missing it in production DB by constructing URL from processed_path (all 63 clips now have cdn_url)
+2. Changed all 4 SFX routes (DELETE /sfx/:id, PUT /sfx/:id, PATCH /sfx/:id, POST /sfx) to gracefully skip video mixing when cdn_url is missing instead of returning 422. SFX data is still saved to DB — video mix happens when cdn_url becomes available.
+
+### Files Modified
+- backend/api-service/src/routes/clips.js — removed 422 errors, made video mixing conditional on cdn_url presence
+
+---

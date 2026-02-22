@@ -40,6 +40,20 @@ export interface EditGuidance {
   suggestions?: EditGuidanceSuggestion[];
 }
 
+export interface SoundSuggestion {
+  label: string;
+  prompt: string;
+}
+
+export interface SfxItem {
+  id: string;
+  timestamp_seconds: number;
+  label: string;
+  prompt: string;
+  sfx_url: string;
+  duration_seconds: number;
+}
+
 export interface Clip {
   id: string;
   video_id: string;
@@ -53,6 +67,11 @@ export interface Clip {
   title: string | null;
   hook: string | null;
   user_approved: boolean | null;
+  sound_url: string | null;
+  sound_prompt: string | null;
+  sound_type: 'sfx' | 'music' | null;
+  sfx_data: SfxItem[] | null;
+  sfx_video_url: string | null;
 }
 
 export interface VideoDetails {
