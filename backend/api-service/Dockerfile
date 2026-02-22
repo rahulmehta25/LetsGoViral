@@ -1,5 +1,8 @@
 FROM node:22-slim
 
+# Install FFmpeg for SFX video mixing
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg && rm -rf /var/lib/apt/lists/*
+
 # Set working directory
 WORKDIR /usr/src/app
 
