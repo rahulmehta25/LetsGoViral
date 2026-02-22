@@ -242,7 +242,7 @@ export function App() {
 
       <Toast message={toast.message} type={toast.type} visible={toast.visible} onDismiss={hideToast} />
 
-      {currentScreen !== 'splash' && currentScreen !== 'onboarding' && (
+      {currentScreen !== 'splash' && currentScreen !== 'onboarding' && currentScreen !== 'reviewer' && (
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 animate-fade-in-up">
           <div className="flex items-center gap-1 bg-black/80 backdrop-blur-xl border border-white/10 rounded-full px-2 py-1.5 shadow-2xl">
             {navItems.map(({ id, label, icon: Icon }) => {

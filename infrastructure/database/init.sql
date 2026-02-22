@@ -78,6 +78,11 @@ CREATE TABLE IF NOT EXISTS clips (
     hook                TEXT,
     content_embedding   VECTOR(768),
     user_approved       BOOLEAN DEFAULT NULL,
+    sound_url           TEXT,
+    sound_prompt        TEXT,
+    sound_type          VARCHAR(10) CHECK (sound_type IN ('sfx', 'music')),
+    sfx_data            JSONB,
+    sfx_video_url       TEXT,
     created_at          TIMESTAMPTZ DEFAULT now()
 );
 
