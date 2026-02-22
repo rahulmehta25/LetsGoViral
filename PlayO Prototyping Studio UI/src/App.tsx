@@ -35,13 +35,12 @@ export function App() {
   };
 
   const hideToast = () => setToast((prev) => ({ ...prev, visible: false }));
-  // Clips need the reviewer if they have start/end timestamps but no CDN URL yet
-  // (new pipeline: processor saves candidates, user reviews, then ffmpeg cuts).
-  // Old pipeline clips (cdn_url set during processing) skip straight to detail.
+  // Route to the reviewer if any clip hasn't been approved yet.
+  // After the user reviews and finalizes, user_approved is set to true and clips go to detail.
   const needsClipReview = (video: VideoDetails | null) => {
     const clips = video?.clips || [];
     if (clips.length === 0) return false;
-    return clips.some((clip) => !clip.cdn_url && clip.start_time_seconds != null);
+    return clips.some((clip) => clip.user_approved !== true);
   };
 
   const loadProjects = async () => {
