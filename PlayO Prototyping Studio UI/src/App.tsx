@@ -152,6 +152,14 @@ export function App() {
     setCurrentScreen('detail');
   };
 
+  const handleReanalyzeClips = async (suggestion: string) => {
+    if (!currentVideoId) throw new Error('No video selected');
+    await webApi.videos.reanalyzeClips(currentVideoId, suggestion);
+    const refreshed = await webApi.videos.get(currentVideoId);
+    setCurrentVideo(refreshed);
+    showToast('Clips re-analyzed with AI', 'success');
+  };
+
   const openReviewer = (clip: Clip) => {
     if (!currentVideo) return;
     const index = currentVideo.clips.findIndex((item) => item.id === clip.id);
@@ -209,6 +217,7 @@ export function App() {
               video={currentVideo}
               startIndex={reviewerClipIndex}
               onFinalize={handleFinalizeClips}
+              onReanalyze={handleReanalyzeClips}
               onError={(message) => showToast(message, 'error')}
             />
           );
@@ -228,6 +237,7 @@ export function App() {
             video={currentVideo}
             startIndex={reviewerClipIndex}
             onFinalize={handleFinalizeClips}
+            onReanalyze={handleReanalyzeClips}
             onError={(message) => showToast(message, 'error')}
           />
         );

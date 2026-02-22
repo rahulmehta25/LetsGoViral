@@ -8,6 +8,7 @@ const path = require('path');
 const { spawn } = require('child_process');
 const db       = require('../db');
 const storage  = require('../services/storage');
+const { reanalyzeClips } = require('../services/clipReanalyzer');
 const { logger } = require('../utils/logger');
 
 const router = express.Router();
@@ -225,6 +226,110 @@ router.post('/:id/finalize-clips', async (req, res) => {
 
   logger.info(`Finalized ${results.length} clips for video ${video.id}`);
   res.json({ data: { video_id: video.id, clips: results } });
+});
+
+// POST /api/videos/:id/reanalyze-clips
+// Re-analyze video clips using Gemini based on user feedback.
+router.post('/:id/reanalyze-clips', async (req, res) => {
+  const { suggestion } = req.body;
+  if (!suggestion || typeof suggestion !== 'string' || !suggestion.trim()) {
+    return res.status(400).json({ error: 'suggestion is required' });
+  }
+
+  const { rows: videoRows } = await db.query(
+    'SELECT id, project_id, original_filename, upload_path, transcription, duration_seconds FROM videos WHERE id = $1',
+    [req.params.id]
+  );
+  const video = videoRows[0];
+  if (!video) return res.status(404).json({ error: 'Video not found' });
+  if (!video.transcription) {
+    return res.status(400).json({ error: 'Video has no transcription — cannot re-analyze' });
+  }
+
+  // Fetch current clips
+  const { rows: currentClips } = await db.query(
+    'SELECT id, title, start_time_seconds, end_time_seconds, duration_seconds, hook, hook_score, rationale, strategic_rank FROM clips WHERE video_id = $1 ORDER BY strategic_rank ASC',
+    [video.id]
+  );
+  if (currentClips.length === 0) {
+    return res.status(400).json({ error: 'No existing clips to refine' });
+  }
+
+  // Resolve GCS URI for Gemini multimodal input
+  const resolved = await storage.resolveUploadObject(video.upload_path, {
+    projectId: video.project_id,
+    originalFilename: video.original_filename,
+  });
+  const gcsUri = `gs://${resolved.bucketName}/${resolved.objectPath}`;
+
+  const newClips = await reanalyzeClips({
+    gcsUri,
+    transcription: video.transcription,
+    videoDurationSeconds: Number(video.duration_seconds),
+    currentClips,
+    userSuggestion: suggestion.trim(),
+  });
+
+  // Transactional clip replacement
+  const client = await db.getClient();
+  try {
+    await client.query('BEGIN');
+
+    // Delete old clips
+    await client.query('DELETE FROM clips WHERE video_id = $1', [video.id]);
+
+    // Insert new clips
+    const usedSlugs = new Set();
+    const insertedClips = [];
+    for (const clip of newClips) {
+      const clipId = uuidv4();
+      let slug = clip.title
+        ? clip.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').substring(0, 60)
+        : clipId;
+      if (usedSlugs.has(slug)) slug = `${slug}-${clipId.slice(0, 8)}`;
+      usedSlugs.add(slug);
+      const destPath = `${video.project_id}/${video.id}/${slug}.mp4`;
+      const duration = parseFloat((clip.end_time_seconds - clip.start_time_seconds).toFixed(3));
+
+      await client.query(
+        `INSERT INTO clips
+           (id, video_id, processed_path, cdn_url,
+            start_time_seconds, end_time_seconds, duration_seconds,
+            strategic_rank, hook_score, rationale, title, hook)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+        [
+          clipId, video.id, destPath, null,
+          clip.start_time_seconds, clip.end_time_seconds, duration,
+          clip.strategic_rank, clip.hook_score, clip.rationale,
+          clip.title, clip.hook,
+        ]
+      );
+
+      insertedClips.push({
+        id: clipId,
+        video_id: video.id,
+        start_time_seconds: clip.start_time_seconds,
+        end_time_seconds: clip.end_time_seconds,
+        duration_seconds: duration,
+        strategic_rank: clip.strategic_rank,
+        hook_score: clip.hook_score,
+        rationale: clip.rationale,
+        title: clip.title,
+        hook: clip.hook,
+        cdn_url: null,
+        user_approved: null,
+      });
+    }
+
+    await client.query('COMMIT');
+    logger.info(`Re-analyzed ${insertedClips.length} clips for video ${video.id}`);
+    res.json({ data: { video_id: video.id, clips: insertedClips } });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
 });
 
 function runFfmpegCut(inputPath, outputPath, start, duration) {

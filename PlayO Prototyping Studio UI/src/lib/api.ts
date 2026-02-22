@@ -72,6 +72,11 @@ export const webApi = {
         method: 'POST',
         body: JSON.stringify({ clips }),
       }),
+    reanalyzeClips: (videoId: string, suggestion: string) =>
+      request<{ video_id: string; clips: Clip[] }>(`/videos/${videoId}/reanalyze-clips`, {
+        method: 'POST',
+        body: JSON.stringify({ suggestion }),
+      }),
   },
   clips: {
     updateApproval: (clipId: string, userApproved: boolean) =>
