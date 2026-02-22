@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, Play, Pause, Wand2, RefreshCw, Loader2, Pencil, Plus, X, Volume2, VolumeX, Sparkles } from 'lucide-react';
+import { ArrowLeft, Play, Pause, Wand2, RefreshCw, Loader2, Pencil, Plus, X, Volume2, VolumeX, Sparkles, SendHorizonal } from 'lucide-react';
 import { Clip, VideoDetails, SfxItem } from '../types';
 import { webApi } from '../lib/api';
 
@@ -8,6 +8,7 @@ interface ClipReviewerScreenProps {
   video: VideoDetails | null;
   startIndex: number;
   onFinalize: (clips: Array<{ id: string; start_time_seconds: number; end_time_seconds: number }>) => Promise<void>;
+  onReanalyze: (suggestion: string) => Promise<void>;
   onError: (message: string) => void;
 }
 
@@ -30,6 +31,7 @@ export function ClipReviewerScreen({
   video,
   startIndex,
   onFinalize,
+  onReanalyze,
   onError,
 }: ClipReviewerScreenProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -42,6 +44,8 @@ export function ClipReviewerScreen({
   const [isPlaying, setIsPlaying] = useState(false);
   const [activeIndex, setActiveIndex] = useState(0);
   const [isFinalizing, setIsFinalizing] = useState(false);
+  const [reanalyzeSuggestion, setReanalyzeSuggestion] = useState('');
+  const [isReanalyzing, setIsReanalyzing] = useState(false);
   const [isLoadingSource, setIsLoadingSource] = useState(false);
   const [sourceError, setSourceError] = useState('');
   const [sourceVideoUrl, setSourceVideoUrl] = useState(video?.source_video_url || '');
@@ -444,6 +448,20 @@ export function ClipReviewerScreen({
     }
   };
 
+  // ── Re-analyze ──
+  const handleReanalyze = async () => {
+    if (!reanalyzeSuggestion.trim() || isReanalyzing) return;
+    setIsReanalyzing(true);
+    try {
+      await onReanalyze(reanalyzeSuggestion.trim());
+      setReanalyzeSuggestion('');
+    } catch (err) {
+      onError(err instanceof Error ? err.message : 'Failed to re-analyze clips');
+    } finally {
+      setIsReanalyzing(false);
+    }
+  };
+
   // ── SFX handlers ──
   const handleRegen = () => {
     if (!activeClip) return;
@@ -735,7 +753,7 @@ export function ClipReviewerScreen({
         </div>
         <button
           onClick={() => void handleFinalize()}
-          disabled={isFinalizing}
+          disabled={isFinalizing || isReanalyzing}
           className="h-10 px-4 rounded-full bg-[#00D4AA] hover:bg-[#00B390] disabled:opacity-50 text-white text-sm font-bold flex items-center gap-2 transition-colors"
         >
           <Wand2 size={14} /> {isFinalizing ? 'Splitting...' : 'Approve & Split'}
@@ -1231,7 +1249,57 @@ export function ClipReviewerScreen({
             );
           })}
         </div>
+
+        {/* ── Refine Clips with AI ── */}
+        <div className="bg-white rounded-2xl border border-gray-200 p-4">
+          <h2 className="text-sm font-bold text-gray-900 mb-2">Refine Clips with AI</h2>
+          <p className="text-xs text-gray-500 mb-3">
+            Describe what you'd like to change and Gemini will re-analyze the video.
+          </p>
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={reanalyzeSuggestion}
+              onChange={(e) => setReanalyzeSuggestion(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  void handleReanalyze();
+                }
+              }}
+              placeholder="e.g. Focus more on the funny parts, make clip 2 shorter..."
+              disabled={isReanalyzing}
+              className="flex-1 px-3 py-2 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-purple-400 focus:border-transparent disabled:opacity-50 placeholder:text-gray-400"
+            />
+            <button
+              onClick={() => void handleReanalyze()}
+              disabled={isReanalyzing || !reanalyzeSuggestion.trim()}
+              className="h-10 px-4 rounded-xl bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white text-sm font-bold flex items-center gap-2 transition-colors flex-shrink-0"
+            >
+              {isReanalyzing ? (
+                <>
+                  <Loader2 size={14} className="animate-spin" /> Re-analyzing...
+                </>
+              ) : (
+                <>
+                  <SendHorizonal size={14} /> Re-analyze
+                </>
+              )}
+            </button>
+          </div>
+        </div>
       </main>
+
+      {/* ── Re-analysis loading overlay ── */}
+      {isReanalyzing && (
+        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center animate-fade-in">
+          <div className="bg-white rounded-2xl p-8 flex flex-col items-center gap-4 shadow-2xl">
+            <Loader2 size={32} className="animate-spin text-purple-600" />
+            <p className="text-sm font-bold text-gray-900">Re-analyzing video...</p>
+            <p className="text-xs text-gray-500">Gemini is finding new clips based on your feedback</p>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
