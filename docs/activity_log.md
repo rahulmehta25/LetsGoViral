@@ -616,3 +616,25 @@ All 8 tests in projects.test.js now passing (CRUD operations all working correct
 Sound effects overlay feature merged successfully. Infrastructure ready: database migrations applied, API secrets configured in GCP Secret Manager and GitHub Actions, ElevenLabs integration fully wired. API service will auto-generate sound effects on first clip review (with session dedup). Frontend updated with SFX UI components and API client methods.
 
 ---
+
+## 2026-02-22 — ElevenLabs SFX Integration Verified Working in Production
+
+### User Prompt
+"Get the ElevenLabs integration working in production."
+
+### Verification Results (all passing)
+1. **GET /api/clips/:id/sound-suggestions** — Gemini tone analysis returns SFX and music prompts (200 OK)
+2. **POST /api/clips/:id/sound** — Single SFX generation via ElevenLabs, uploaded to GCS (200 OK, sound_url populated)
+3. **POST /api/clips/:id/generate-sfx** — Full pipeline: Gemini identifies 4 timestamped SFX moments, ElevenLabs generates audio for each, FFmpeg mixes onto video, uploads to GCS (200 OK, sfx_data + sfx_video_url populated)
+4. **SFX mixed video accessible at CDN URL** (5.2MB, HTTP 200)
+
+### Test clip used
+ce4f4288-3255-455f-812b-123ee63351eb ("The Superpower of Good Communication", 42.5s)
+
+### Production Configuration Confirmed
+- **ELEVEN_LABS_API_KEY**: mounted via Secret Manager (clipora-elevenlabs-api-key)
+- **FFmpeg**: installed in api-service Docker image
+- **GCS**: sounds/{clipId}/ and sfx-videos/{clipId}/ paths working
+- **Gemini 2.0 Flash**: working via Vertex AI for tone analysis
+
+---
