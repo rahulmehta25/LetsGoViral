@@ -124,12 +124,23 @@ export function ClipReviewerScreen({
   const tlDurRef = useRef(timelineDuration);
   tlDurRef.current = timelineDuration;
 
+  const scrubStartRef = useRef(0);
+  const scrubRangeRef = useRef(timelineDuration);
+
   const timeFromEl = (clientX: number, el: HTMLElement | null) => {
     if (!el) return 0;
     const rect = el.getBoundingClientRect();
     if (rect.width <= 0) return 0;
     const pct = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
     return pct * tlDurRef.current;
+  };
+
+  const timeFromScrubber = (clientX: number, el: HTMLElement | null) => {
+    if (!el) return 0;
+    const rect = el.getBoundingClientRect();
+    if (rect.width <= 0) return 0;
+    const pct = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+    return scrubStartRef.current + pct * scrubRangeRef.current;
   };
 
   // Auto-highlight whichever clip the playhead is inside
@@ -381,14 +392,14 @@ export function ClipReviewerScreen({
     scrubResumeRef.current = shouldResume;
     if (shouldResume) v.pause();
     setIsScrubbing(true);
-    seekTo(timeFromEl(e.clientX, scrubberRef.current));
+    seekTo(timeFromScrubber(e.clientX, scrubberRef.current));
   };
 
   useEffect(() => {
     if (!isScrubbing) return;
 
     const move = (e: PointerEvent) => {
-      seekTo(timeFromEl(e.clientX, scrubberRef.current));
+      seekTo(timeFromScrubber(e.clientX, scrubberRef.current));
     };
 
     const end = () => {
@@ -722,6 +733,15 @@ export function ClipReviewerScreen({
 
   const playheadPct = (currentTime / timelineDuration) * 100;
 
+  // Zoom scrubber to active clip range
+  const scrubPadding = activeClip ? (activeClip.end - activeClip.start) * 0.1 : 0;
+  const scrubStart = activeClip ? Math.max(0, activeClip.start - scrubPadding) : 0;
+  const scrubEnd = activeClip ? Math.min(timelineDuration, activeClip.end + scrubPadding) : timelineDuration;
+  const scrubRange = Math.max(0.1, scrubEnd - scrubStart);
+  scrubStartRef.current = scrubStart;
+  scrubRangeRef.current = scrubRange;
+  const scrubPlayheadPct = Math.max(0, Math.min(100, ((currentTime - scrubStart) / scrubRange) * 100));
+
   // SFX data for the currently active clip
   // Prefer localSfx (client-side changes from regen/add/edit/delete) over server data
   const sfxClipState = activeClip ? localSfx[activeClip.id] : undefined;
@@ -895,7 +915,7 @@ export function ClipReviewerScreen({
             </div>
           </div>
 
-          {/* Scrubber */}
+          {/* Scrubber (zoomed to active clip) */}
           <div className="mt-3">
             <div
               ref={scrubberRef}
@@ -905,18 +925,18 @@ export function ClipReviewerScreen({
             >
               <div
                 className="absolute left-0 top-0 bottom-0 rounded-full bg-gray-400"
-                style={{ width: `${playheadPct}%` }}
+                style={{ width: `${scrubPlayheadPct}%` }}
               />
               <div
                 className="absolute top-1/2 -translate-y-1/2 h-4 w-4 rounded-full bg-black shadow border-2 border-white"
-                style={{ left: `calc(${playheadPct}% - 8px)` }}
+                style={{ left: `calc(${scrubPlayheadPct}% - 8px)` }}
               />
             </div>
           </div>
 
           <div className="mt-2 flex justify-between text-[10px] text-gray-400 font-mono">
-            <span>0:00</span>
-            <span>{fmt(timelineDuration)}</span>
+            <span>{fmt(scrubStart)}</span>
+            <span>{fmt(scrubEnd)}</span>
           </div>
         </div>
 
