@@ -6,7 +6,7 @@ import {
   User,
   Bot } from
 'lucide-react';
-import { Card } from '../components/ui/Card';
+import ReactMarkdown from 'react-markdown';
 import { useChat } from '../hooks/useChat';
 interface ChatScreenProps {
   onNavigate: (screen: string) => void;
@@ -53,8 +53,11 @@ export function ChatScreen({ onNavigate }: ChatScreenProps) {
       {/* Chat Area */}
       <main className="flex-1 overflow-y-auto">
         <div className="max-w-3xl mx-auto w-full p-4 space-y-4">
-        {messages.map((msg) =>
-        <div
+        {messages.map((msg) => {
+          // Skip empty AI bubbles while streaming — the typing indicator covers this
+          if (msg.role === 'ai' && msg.text === '' && isStreaming) return null;
+          return (
+          <div
           key={msg.id}
           className={`flex gap-3 ${msg.role === 'user' ? 'flex-row-reverse' : ''} animate-fade-in-up`}>
 
@@ -66,10 +69,17 @@ export function ChatScreen({ onNavigate }: ChatScreenProps) {
             <div
             className={`max-w-[80%] p-4 rounded-2xl text-sm leading-relaxed shadow-sm ${msg.role === 'user' ? 'bg-[#00D4AA] text-white rounded-tr-none' : 'bg-white text-gray-800 border border-gray-100 rounded-tl-none'}`}>
 
-              <p className="whitespace-pre-wrap">{msg.text}</p>
+              {msg.role === 'ai' ? (
+                <div className="prose prose-sm prose-p:my-1 prose-ul:my-1 prose-li:my-0 max-w-none [&_strong]:font-semibold [&_*]:text-inherit">
+                  <ReactMarkdown>{msg.text}</ReactMarkdown>
+                </div>
+              ) : (
+                <p className="whitespace-pre-wrap">{msg.text}</p>
+              )}
             </div>
           </div>
-        )}
+          );
+        })}
 
         {isStreaming && messages[messages.length - 1]?.text === '' &&
         <div className="flex gap-3 animate-fade-in">
@@ -133,31 +143,27 @@ export function ChatScreen({ onNavigate }: ChatScreenProps) {
           )}
         </div>
 
-        <Card
-          className="flex items-center gap-2 p-2 rounded-full shadow-lg border-gray-100 bg-white"
-          noPadding>
-
+        <div className="flex items-center gap-2 p-2 rounded-full shadow-lg border border-gray-100 bg-white">
           <input
             type="text"
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
-              e.preventDefault();
-              handleSend();
-            }
-          }}
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                handleSend();
+              }
+            }}
             placeholder="Ask for script ideas..."
-            className="flex-1 bg-transparent border-none focus:ring-0 px-4 text-sm outline-none" />
+            className="flex-1 min-w-0 bg-transparent border-none focus:ring-0 px-4 text-sm outline-none" />
 
           <button
             onClick={() => handleSend()}
             disabled={!input.trim() || isStreaming}
-            className="w-10 h-10 bg-[#00D4AA] rounded-full flex items-center justify-center text-white hover:bg-[#00B390] transition-all shadow-md disabled:opacity-50 disabled:cursor-not-allowed active:scale-95">
-
+            className="shrink-0 w-10 h-10 bg-[#00D4AA] rounded-full flex items-center justify-center text-white hover:bg-[#00B390] transition-all shadow-md disabled:opacity-50 disabled:cursor-not-allowed active:scale-95">
             <Send size={18} className="ml-0.5" />
           </button>
-        </Card>
+        </div>
         </div>
       </div>
     </div>);
