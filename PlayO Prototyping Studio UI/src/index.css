@@ -60,3 +60,42 @@
     font-feature-settings: "rlig" 1, "calt" 1;
   }
 }
+
+/* Volume slider styling */
+input[type="range"].accent-\[\#00D4AA\] {
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+  height: 20px;
+}
+input[type="range"].accent-\[\#00D4AA\]::-webkit-slider-runnable-track {
+  height: 6px;
+  border-radius: 3px;
+  background: #e5e7eb;
+}
+input[type="range"].accent-\[\#00D4AA\]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #00D4AA;
+  border: 2px solid white;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+  margin-top: -5px;
+  cursor: pointer;
+}
+input[type="range"].accent-\[\#00D4AA\]::-moz-range-track {
+  height: 6px;
+  border-radius: 3px;
+  background: #e5e7eb;
+}
+input[type="range"].accent-\[\#00D4AA\]::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #00D4AA;
+  border: 2px solid white;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+  cursor: pointer;
+}

@@ -101,17 +101,17 @@ export const webApi = {
       request<{ clip: Clip }>(`/clips/${clipId}/generate-sfx`, { method: 'POST' }),
     deleteSfxItem: (clipId: string, sfxId: string) =>
       request<{ clip: Clip }>(`/clips/${clipId}/sfx/${sfxId}`, { method: 'DELETE' }),
-    updateSfxItem: (clipId: string, sfxId: string, prompt: string) =>
+    updateSfxItem: (clipId: string, sfxId: string, payload: { prompt?: string; volume?: number }) =>
       request<{ clip: Clip }>(`/clips/${clipId}/sfx/${sfxId}`, {
         method: 'PUT',
-        body: JSON.stringify({ prompt }),
+        body: JSON.stringify(payload),
       }),
     updateSfxTimestamp: (clipId: string, sfxId: string, timestamp_seconds: number) =>
       request<{ clip: Clip }>(`/clips/${clipId}/sfx/${sfxId}`, {
         method: 'PATCH',
         body: JSON.stringify({ timestamp_seconds }),
       }),
-    addSfx: (clipId: string, payload: { prompt: string; timestamp_seconds: number; label?: string }) =>
+    addSfx: (clipId: string, payload: { prompt: string; timestamp_seconds: number; label?: string; volume?: number }) =>
       request<{ clip: Clip }>(`/clips/${clipId}/sfx`, {
         method: 'POST',
         body: JSON.stringify(payload),
