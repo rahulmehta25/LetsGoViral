@@ -202,9 +202,9 @@ router.put('/:id/sfx/:sfx_id', async (req, res) => {
   const { generateAudio, uploadSfxToGCS } = require('../services/elevenlabs');
   const { mixSfxOntoVideo, uploadMixedVideoToGCS } = require('../services/sfxMixer');
 
-  const { prompt, timestamp_seconds } = req.body;
-  if (!prompt && timestamp_seconds === undefined) {
-    return res.status(400).json({ error: 'at least one of prompt or timestamp_seconds is required' });
+  const { prompt, timestamp_seconds, volume } = req.body;
+  if (!prompt && timestamp_seconds === undefined && volume === undefined) {
+    return res.status(400).json({ error: 'at least one of prompt, timestamp_seconds, or volume is required' });
   }
 
   const { rows } = await db.query('SELECT * FROM clips WHERE id = $1', [req.params.id]);
@@ -227,6 +227,10 @@ router.put('/:id/sfx/:sfx_id', async (req, res) => {
   if (timestamp_seconds !== undefined) {
     const t = Math.max(0, Number(timestamp_seconds));
     updatedSfx[itemIndex] = { ...updatedSfx[itemIndex], timestamp_seconds: t };
+  }
+  if (volume !== undefined) {
+    const v = Math.max(0, Math.min(1, Number(volume)));
+    updatedSfx[itemIndex] = { ...updatedSfx[itemIndex], volume: v };
   }
 
   if (!clip.cdn_url) {
@@ -282,7 +286,7 @@ router.post('/:id/sfx', async (req, res) => {
   const { generateAudio, uploadSfxToGCS } = require('../services/elevenlabs');
   const { mixSfxOntoVideo, uploadMixedVideoToGCS } = require('../services/sfxMixer');
 
-  const { prompt, timestamp_seconds, label } = req.body;
+  const { prompt, timestamp_seconds, label, volume } = req.body;
   if (!prompt || timestamp_seconds === undefined) {
     return res.status(400).json({ error: 'prompt and timestamp_seconds are required' });
   }
@@ -299,6 +303,7 @@ router.post('/:id/sfx', async (req, res) => {
   const newIndex = currentSfx.length;
   const sfxUrl = await uploadSfxToGCS(buffer, clip.id, newIndex);
 
+  const vol = typeof volume === 'number' ? Math.max(0, Math.min(1, volume)) : 1.0;
   const newItem = {
     id: uuidv4(),
     timestamp_seconds: t,
@@ -306,6 +311,7 @@ router.post('/:id/sfx', async (req, res) => {
     prompt,
     sfx_url: sfxUrl,
     duration_seconds: durationSeconds,
+    volume: vol,
   };
   const updatedSfx = [...currentSfx, newItem];
 

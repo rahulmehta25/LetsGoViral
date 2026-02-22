@@ -638,3 +638,27 @@ ce4f4288-3255-455f-812b-123ee63351eb ("The Superpower of Good Communication", 42
 - **Gemini 2.0 Flash**: working via Vertex AI for tone analysis
 
 ---
+
+## 2026-02-22 — Add Per-Track Volume Control to SFX Mixer
+
+### User Prompt
+"Add volume control for background music in sfxMixer."
+
+### Actions Taken
+- Claude Code: Modified backend/api-service/src/services/sfxMixer.js — Added per-track `volume` filter (0.0-1.0, default 1.0) to FFmpeg filter_complex. Each SFX track now receives `volume=V,adelay=Xms` instead of just `adelay=Xms`. Volume clamped to [0,1] range.
+- Claude Code: Modified backend/api-service/src/routes/clips.js POST /sfx endpoint — Accepts optional `volume` field in request body, persists it in sfx_data JSONB column.
+- Claude Code: Modified backend/api-service/src/routes/clips.js PUT /sfx/:sfx_id endpoint — Accepts optional `volume` field for updating individual SFX volume, triggers re-mix on the parent clip.
+
+### Files Modified
+- /Users/rahulmehta/Desktop/Projects/Lets-Go-Viral/backend/api-service/src/services/sfxMixer.js
+- /Users/rahulmehta/Desktop/Projects/Lets-Go-Viral/backend/api-service/src/routes/clips.js
+
+### Usage
+To add quiet background music, POST /api/clips/:clip_id/sfx with `{ "prompt": "...", "volume": 0.15 }`. SFX hits default to `volume: 1.0` (full volume).
+
+### Technical Details
+- Volume is a per-SFX setting stored in sfx_data JSONB alongside timestamp, prompt, type, and gcs_path
+- FFmpeg volume filter applied per-audio-input before mixing
+- Backward compatible: existing SFX without explicit volume setting default to 1.0
+
+---

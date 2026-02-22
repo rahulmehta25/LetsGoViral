@@ -29,8 +29,10 @@ async function downloadToBuffer(url) {
 
 /**
  * Mix sfxItems onto a clip video at their respective timestamps.
+ * Each item may include an optional `volume` (0.0–1.0, default 1.0)
+ * to control per-track loudness (useful for quieter background music).
  * @param {string} clipCdnUrl - CDN URL of the source clip video
- * @param {Array<{sfx_url: string, timestamp_seconds: number}>} sfxItems
+ * @param {Array<{sfx_url: string, timestamp_seconds: number, volume?: number}>} sfxItems
  * @returns {Promise<Buffer>} - Buffer of the output MP4
  */
 async function mixSfxOntoVideo(clipCdnUrl, sfxItems) {
@@ -81,11 +83,12 @@ async function mixSfxOntoVideo(clipCdnUrl, sfxItems) {
     }
 
     // Build filter_complex
-    // Each SFX: [N:a]adelay=Xms|Xms[sN]
+    // Each SFX: [N:a]volume=V,adelay=Xms|Xms[sN]
     // Then mix: [0:a][s0][s1]...[sN-1]amix=inputs=M:normalize=0[aout]
     const delayFilters = sfxItems.map((item, i) => {
       const delayMs = Math.round(item.timestamp_seconds * 1000);
-      return `[${i + 1}:a]adelay=${delayMs}|${delayMs}[s${i}]`;
+      const vol = typeof item.volume === 'number' ? Math.max(0, Math.min(1, item.volume)) : 1.0;
+      return `[${i + 1}:a]volume=${vol},adelay=${delayMs}|${delayMs}[s${i}]`;
     });
 
     let mixInputs;
