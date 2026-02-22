@@ -79,6 +79,9 @@ export interface VideoDetails {
   id: string;
   project_id: string;
   processing_status: string;
+  duration_seconds?: number | null;
+  transcription?: string | null;
+  original_filename?: string | null;
   source_video_url?: string | null;
   clips: Clip[];
   edit_guidance?: EditGuidance;

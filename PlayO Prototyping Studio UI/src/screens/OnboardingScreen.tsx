@@ -84,7 +84,7 @@ export function OnboardingScreen({ onContinue }: OnboardingScreenProps) {
             </div>
 
             <p className="text-center text-xs text-gray-400">
-              By continuing, you agree to our Terms & Privacy Policy.
+              Auth coming soon — tap any button to continue as guest.
             </p>
           </div>
         </Card>

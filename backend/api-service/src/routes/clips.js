@@ -146,9 +146,10 @@ router.post('/:id/generate-sfx', async (req, res) => {
   // Step 2: Generate each SFX audio with ElevenLabs and upload to GCS
   const sfxItems = await Promise.all(
     sfxPlan.map(async (s, i) => {
+      const id = uuidv4();
       const buffer = await generateAudio(s.prompt, s.duration_seconds);
-      const sfxUrl = await uploadSfxToGCS(buffer, clipId, i);
-      return { ...s, id: uuidv4(), sfx_url: sfxUrl };
+      const sfxUrl = await uploadSfxToGCS(buffer, clipId, id);
+      return { ...s, id, sfx_url: sfxUrl };
     })
   );
 
@@ -222,7 +223,7 @@ router.put('/:id/sfx/:sfx_id', async (req, res) => {
 
   if (prompt) {
     const buffer = await generateAudio(prompt, item.duration_seconds || 2);
-    const sfxUrl = await uploadSfxToGCS(buffer, clip.id, itemIndex);
+    const sfxUrl = await uploadSfxToGCS(buffer, clip.id, item.id);
     updatedSfx[itemIndex] = { ...updatedSfx[itemIndex], prompt, sfx_url: sfxUrl };
   }
   if (timestamp_seconds !== undefined) {
@@ -301,12 +302,12 @@ router.post('/:id/sfx', async (req, res) => {
   const durationSeconds = 2;
 
   const buffer = await generateAudio(prompt, durationSeconds);
-  const newIndex = currentSfx.length;
-  const sfxUrl = await uploadSfxToGCS(buffer, clip.id, newIndex);
+  const newId = uuidv4();
+  const sfxUrl = await uploadSfxToGCS(buffer, clip.id, newId);
 
   const vol = typeof volume === 'number' ? Math.max(0, Math.min(1, volume)) : 1.0;
   const newItem = {
-    id: uuidv4(),
+    id: newId,
     timestamp_seconds: t,
     label: (label || 'SFX').slice(0, 15),
     prompt,

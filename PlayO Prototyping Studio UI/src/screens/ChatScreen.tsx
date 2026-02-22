@@ -10,9 +10,11 @@ import ReactMarkdown from 'react-markdown';
 import { useChat } from '../hooks/useChat';
 interface ChatScreenProps {
   onNavigate: (screen: string) => void;
+  projectId: string | null;
+  onError: (message: string) => void;
 }
-export function ChatScreen({ onNavigate }: ChatScreenProps) {
-  const { messages, isStreaming, error, sendMessage } = useChat();
+export function ChatScreen({ onNavigate, projectId, onError }: ChatScreenProps) {
+  const { messages, isStreaming, error, sendMessage } = useChat(projectId);
   const [input, setInput] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollToBottom = () => {
@@ -116,7 +118,7 @@ export function ChatScreen({ onNavigate }: ChatScreenProps) {
             <div className="max-w-[80%] p-4 rounded-2xl rounded-tl-none text-sm bg-red-50 border border-red-200 text-red-700">
               <p className="font-semibold mb-1">Connection error</p>
               <p className="font-mono text-xs">{error}</p>
-              <p className="mt-2 text-xs text-red-500">Check that VITE_GEMINI_API_KEY is set in your .env file and restart the dev server.</p>
+              <p className="mt-2 text-xs text-red-500">Check that the backend is running and accessible.</p>
             </div>
           </div>
         }
