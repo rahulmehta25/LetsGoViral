@@ -20,8 +20,36 @@ export function ProjectDetailScreen({
   onOpenReviewer,
 }: ProjectDetailScreenProps) {
   const [activeTab, setActiveTab] = useState('Clips');
+  const [isExporting, setIsExporting] = useState(false);
   const clips = video?.clips || [];
   const hasFinalizedClips = clips.length > 0 && clips.every((clip) => Boolean(clip.cdn_url) && clip.user_approved === true);
+
+  const downloadClip = async (clip: Clip) => {
+    if (!clip.cdn_url) return;
+    const res = await fetch(clip.cdn_url);
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${clip.title || `clip-${clip.strategic_rank ?? clip.id.slice(0, 8)}`}.mp4`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  };
+
+  const exportAllClips = async () => {
+    const downloadable = clips.filter((c) => c.cdn_url);
+    if (downloadable.length === 0) return;
+    setIsExporting(true);
+    try {
+      for (const clip of downloadable) {
+        await downloadClip(clip);
+      }
+    } finally {
+      setIsExporting(false);
+    }
+  };
 
   return (
     <div className="fixed inset-0 bg-[#F5F5F5] flex flex-col animate-slide-up">
@@ -119,6 +147,13 @@ export function ProjectDetailScreen({
                         </div>
                         <p className="text-xs text-gray-500 line-clamp-2 leading-relaxed">{clip.rationale || 'No rationale provided.'}</p>
                       </div>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); void downloadClip(clip); }}
+                        className="self-end p-1.5 rounded-full hover:bg-gray-100 text-gray-400 hover:text-gray-700 transition-colors"
+                        title="Download clip"
+                      >
+                        <Download size={14} />
+                      </button>
                     </div>
                   </div>
                 </Card>
@@ -153,11 +188,18 @@ export function ProjectDetailScreen({
           </div>
         )}
 
-        <div className="pt-4">
-          <Button fullWidth className="bg-black text-white hover:bg-gray-900">
-            <Download size={16} className="mr-2" /> Export Selected Clips
-          </Button>
-        </div>
+        {hasFinalizedClips && (
+          <div className="pt-4">
+            <Button
+              fullWidth
+              className="bg-black text-white hover:bg-gray-900"
+              onClick={() => void exportAllClips()}
+              disabled={isExporting}
+            >
+              <Download size={16} className="mr-2" /> {isExporting ? 'Downloading...' : `Export All ${clips.length} Clips`}
+            </Button>
+          </div>
+        )}
       </main>
     </div>
   );
